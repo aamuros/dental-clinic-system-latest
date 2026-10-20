@@ -11,6 +11,7 @@ export const roleLabels: Record<StaffRole, string> = {
 export const permissions = [
   'dashboard.read',
   'patients.read',
+  'patients.write',
   'appointments.read',
   'clinical.read',
   'clinical.write',
@@ -28,6 +29,7 @@ export const rolePermissions: Record<StaffRole, readonly Permission[]> = {
   administrator: [
     'dashboard.read',
     'patients.read',
+    'patients.write',
     'appointments.read',
     'billing.read',
     'inventory.read',
@@ -39,6 +41,7 @@ export const rolePermissions: Record<StaffRole, readonly Permission[]> = {
   dentist: [
     'dashboard.read',
     'patients.read',
+    'patients.write',
     'appointments.read',
     'clinical.read',
     'clinical.write',
@@ -51,7 +54,12 @@ export const rolePermissions: Record<StaffRole, readonly Permission[]> = {
     'clinical.read',
     'inventory.read',
   ],
-  receptionist: ['dashboard.read', 'patients.read', 'appointments.read'],
+  receptionist: [
+    'dashboard.read',
+    'patients.read',
+    'patients.write',
+    'appointments.read',
+  ],
   billing_staff: [
     'dashboard.read',
     'patients.read',

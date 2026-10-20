@@ -113,8 +113,7 @@ export function DashboardPage({ workspace }: { workspace: Workspace }) {
             ))}
           </div>
           <p className="mt-4 text-xs leading-5 text-muted-foreground">
-            Module previews are available. Data entry will be enabled in a
-            future release.
+            Patient management is available. Other modules are previews.
           </p>
         </section>
         <section aria-labelledby="activity-heading" className="xl:col-span-2">

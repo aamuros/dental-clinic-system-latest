@@ -243,27 +243,48 @@ export type Database = {
       }
       patients: {
         Row: {
+          address: string | null
+          birth_date: string | null
           clinic_id: string
           created_at: string
+          email: string | null
           first_name: string
+          gender: string
           id: string
           last_name: string
+          middle_name: string | null
+          phone: string | null
+          search_text: string | null
           updated_at: string
         }
         Insert: {
+          address?: string | null
+          birth_date?: string | null
           clinic_id: string
           created_at?: string
+          email?: string | null
           first_name: string
+          gender?: string
           id?: string
           last_name: string
+          middle_name?: string | null
+          phone?: string | null
+          search_text?: string | null
           updated_at?: string
         }
         Update: {
+          address?: string | null
+          birth_date?: string | null
           clinic_id?: string
           created_at?: string
+          email?: string | null
           first_name?: string
+          gender?: string
           id?: string
           last_name?: string
+          middle_name?: string | null
+          phone?: string | null
+          search_text?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -365,7 +386,16 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      save_patient: {
+        Args: {
+          p_allow_duplicate?: boolean
+          p_branch_ids: string[]
+          p_details: Json
+          p_expected_updated_at?: string
+          p_patient_id?: string
+        }
+        Returns: Json
+      }
     }
     Enums: {
       appointment_status: "scheduled" | "confirmed" | "completed" | "cancelled"

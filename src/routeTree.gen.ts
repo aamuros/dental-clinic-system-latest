@@ -23,6 +23,11 @@ import { Route as AppReportsRouteImport } from './routes/_app.reports'
 import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as AppStaffRouteImport } from './routes/_app.staff'
 import { Route as AppTreatmentsRouteImport } from './routes/_app.treatments'
+import { Route as AppPatientsIndexRouteImport } from './routes/_app.patients.index'
+import { Route as AppPatientsPatientIdRouteImport } from './routes/_app.patients.$patientId'
+import { Route as AppPatientsNewRouteImport } from './routes/_app.patients.new'
+import { Route as AppPatientsPatientIdIndexRouteImport } from './routes/_app.patients.$patientId.index'
+import { Route as AppPatientsPatientIdEditRouteImport } from './routes/_app.patients.$patientId.edit'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -93,6 +98,33 @@ const AppTreatmentsRoute = AppTreatmentsRouteImport.update({
   path: '/treatments',
   getParentRoute: () => AppRoute,
 } as any)
+const AppPatientsIndexRoute = AppPatientsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppPatientsRoute,
+} as any)
+const AppPatientsPatientIdRoute = AppPatientsPatientIdRouteImport.update({
+  id: '/$patientId',
+  path: '/$patientId',
+  getParentRoute: () => AppPatientsRoute,
+} as any)
+const AppPatientsNewRoute = AppPatientsNewRouteImport.update({
+  id: '/new',
+  path: '/new',
+  getParentRoute: () => AppPatientsRoute,
+} as any)
+const AppPatientsPatientIdIndexRoute =
+  AppPatientsPatientIdIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AppPatientsPatientIdRoute,
+  } as any)
+const AppPatientsPatientIdEditRoute =
+  AppPatientsPatientIdEditRouteImport.update({
+    id: '/edit',
+    path: '/edit',
+    getParentRoute: () => AppPatientsPatientIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -103,11 +135,16 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof AppDashboardRoute
   '/dental-charting': typeof AppDentalChartingRoute
   '/inventory': typeof AppInventoryRoute
-  '/patients': typeof AppPatientsRoute
+  '/patients': typeof AppPatientsRouteWithChildren
   '/reports': typeof AppReportsRoute
   '/settings': typeof AppSettingsRoute
   '/staff': typeof AppStaffRoute
   '/treatments': typeof AppTreatmentsRoute
+  '/patients/$patientId': typeof AppPatientsPatientIdRouteWithChildren
+  '/patients/new': typeof AppPatientsNewRoute
+  '/patients/': typeof AppPatientsIndexRoute
+  '/patients/$patientId/edit': typeof AppPatientsPatientIdEditRoute
+  '/patients/$patientId/': typeof AppPatientsPatientIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -118,11 +155,14 @@ export interface FileRoutesByTo {
   '/dashboard': typeof AppDashboardRoute
   '/dental-charting': typeof AppDentalChartingRoute
   '/inventory': typeof AppInventoryRoute
-  '/patients': typeof AppPatientsRoute
   '/reports': typeof AppReportsRoute
   '/settings': typeof AppSettingsRoute
   '/staff': typeof AppStaffRoute
   '/treatments': typeof AppTreatmentsRoute
+  '/patients/new': typeof AppPatientsNewRoute
+  '/patients': typeof AppPatientsIndexRoute
+  '/patients/$patientId/edit': typeof AppPatientsPatientIdEditRoute
+  '/patients/$patientId': typeof AppPatientsPatientIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -135,11 +175,16 @@ export interface FileRoutesById {
   '/_app/dashboard': typeof AppDashboardRoute
   '/_app/dental-charting': typeof AppDentalChartingRoute
   '/_app/inventory': typeof AppInventoryRoute
-  '/_app/patients': typeof AppPatientsRoute
+  '/_app/patients': typeof AppPatientsRouteWithChildren
   '/_app/reports': typeof AppReportsRoute
   '/_app/settings': typeof AppSettingsRoute
   '/_app/staff': typeof AppStaffRoute
   '/_app/treatments': typeof AppTreatmentsRoute
+  '/_app/patients/$patientId': typeof AppPatientsPatientIdRouteWithChildren
+  '/_app/patients/new': typeof AppPatientsNewRoute
+  '/_app/patients/': typeof AppPatientsIndexRoute
+  '/_app/patients/$patientId/edit': typeof AppPatientsPatientIdEditRoute
+  '/_app/patients/$patientId/': typeof AppPatientsPatientIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -157,6 +202,11 @@ export interface FileRouteTypes {
     | '/settings'
     | '/staff'
     | '/treatments'
+    | '/patients/$patientId'
+    | '/patients/new'
+    | '/patients/'
+    | '/patients/$patientId/edit'
+    | '/patients/$patientId/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -167,11 +217,14 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/dental-charting'
     | '/inventory'
-    | '/patients'
     | '/reports'
     | '/settings'
     | '/staff'
     | '/treatments'
+    | '/patients/new'
+    | '/patients'
+    | '/patients/$patientId/edit'
+    | '/patients/$patientId'
   id:
     | '__root__'
     | '/'
@@ -188,6 +241,11 @@ export interface FileRouteTypes {
     | '/_app/settings'
     | '/_app/staff'
     | '/_app/treatments'
+    | '/_app/patients/$patientId'
+    | '/_app/patients/new'
+    | '/_app/patients/'
+    | '/_app/patients/$patientId/edit'
+    | '/_app/patients/$patientId/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -296,8 +354,72 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppTreatmentsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/patients/': {
+      id: '/_app/patients/'
+      path: '/'
+      fullPath: '/patients/'
+      preLoaderRoute: typeof AppPatientsIndexRouteImport
+      parentRoute: typeof AppPatientsRoute
+    }
+    '/_app/patients/$patientId': {
+      id: '/_app/patients/$patientId'
+      path: '/$patientId'
+      fullPath: '/patients/$patientId'
+      preLoaderRoute: typeof AppPatientsPatientIdRouteImport
+      parentRoute: typeof AppPatientsRoute
+    }
+    '/_app/patients/new': {
+      id: '/_app/patients/new'
+      path: '/new'
+      fullPath: '/patients/new'
+      preLoaderRoute: typeof AppPatientsNewRouteImport
+      parentRoute: typeof AppPatientsRoute
+    }
+    '/_app/patients/$patientId/': {
+      id: '/_app/patients/$patientId/'
+      path: '/'
+      fullPath: '/patients/$patientId/'
+      preLoaderRoute: typeof AppPatientsPatientIdIndexRouteImport
+      parentRoute: typeof AppPatientsPatientIdRoute
+    }
+    '/_app/patients/$patientId/edit': {
+      id: '/_app/patients/$patientId/edit'
+      path: '/edit'
+      fullPath: '/patients/$patientId/edit'
+      preLoaderRoute: typeof AppPatientsPatientIdEditRouteImport
+      parentRoute: typeof AppPatientsPatientIdRoute
+    }
   }
 }
+
+interface AppPatientsPatientIdRouteChildren {
+  AppPatientsPatientIdEditRoute: typeof AppPatientsPatientIdEditRoute
+  AppPatientsPatientIdIndexRoute: typeof AppPatientsPatientIdIndexRoute
+}
+
+const AppPatientsPatientIdRouteChildren: AppPatientsPatientIdRouteChildren = {
+  AppPatientsPatientIdEditRoute: AppPatientsPatientIdEditRoute,
+  AppPatientsPatientIdIndexRoute: AppPatientsPatientIdIndexRoute,
+}
+
+const AppPatientsPatientIdRouteWithChildren =
+  AppPatientsPatientIdRoute._addFileChildren(AppPatientsPatientIdRouteChildren)
+
+interface AppPatientsRouteChildren {
+  AppPatientsPatientIdRoute: typeof AppPatientsPatientIdRouteWithChildren
+  AppPatientsNewRoute: typeof AppPatientsNewRoute
+  AppPatientsIndexRoute: typeof AppPatientsIndexRoute
+}
+
+const AppPatientsRouteChildren: AppPatientsRouteChildren = {
+  AppPatientsPatientIdRoute: AppPatientsPatientIdRouteWithChildren,
+  AppPatientsNewRoute: AppPatientsNewRoute,
+  AppPatientsIndexRoute: AppPatientsIndexRoute,
+}
+
+const AppPatientsRouteWithChildren = AppPatientsRoute._addFileChildren(
+  AppPatientsRouteChildren,
+)
 
 interface AppRouteChildren {
   AppAccessDeniedRoute: typeof AppAccessDeniedRoute
@@ -306,7 +428,7 @@ interface AppRouteChildren {
   AppDashboardRoute: typeof AppDashboardRoute
   AppDentalChartingRoute: typeof AppDentalChartingRoute
   AppInventoryRoute: typeof AppInventoryRoute
-  AppPatientsRoute: typeof AppPatientsRoute
+  AppPatientsRoute: typeof AppPatientsRouteWithChildren
   AppReportsRoute: typeof AppReportsRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppStaffRoute: typeof AppStaffRoute
@@ -320,7 +442,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppDashboardRoute: AppDashboardRoute,
   AppDentalChartingRoute: AppDentalChartingRoute,
   AppInventoryRoute: AppInventoryRoute,
-  AppPatientsRoute: AppPatientsRoute,
+  AppPatientsRoute: AppPatientsRouteWithChildren,
   AppReportsRoute: AppReportsRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppStaffRoute: AppStaffRoute,

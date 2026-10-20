@@ -12,8 +12,10 @@ export function AppHeader({ workspace }: { workspace: Workspace }) {
     select: (state) => state.location.pathname,
   })
   const current =
-    modules.find((module) => module.path === pathname)?.label ??
-    'Access restricted'
+    modules.find(
+      (module) =>
+        module.path === pathname || pathname.startsWith(`${module.path}/`),
+    )?.label ?? 'Access restricted'
   const initials = workspace.staff.displayName
     .split(/\s+/)
     .filter(Boolean)

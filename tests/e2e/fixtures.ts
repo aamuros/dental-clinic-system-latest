@@ -18,16 +18,18 @@ interface StaffOptions {
   active?: boolean
   profile?: boolean
 }
-interface LocalClinic {
+export interface LocalClinic {
   admin: SupabaseClient<Database>
   id: string
   branchId: string
+  otherBranchId: string
   name: string
 }
 interface Fixtures {
   createStaff: (options?: StaffOptions) => Promise<StaffAccount>
   signIn: (staff: StaffAccount) => Promise<void>
   runtimeErrors: void
+  expected404s: string[]
 }
 
 function checked<T extends { data: unknown; error: unknown }>(
@@ -71,6 +73,7 @@ export const test = base.extend<Fixtures, { clinic: LocalClinic }>({
       })
       const id = randomUUID(),
         branchId = randomUUID(),
+        otherBranchId = randomUUID(),
         name = `Synthetic Browser Clinic ${browserName} ${id.slice(0, 8)}`
       try {
         checked(
@@ -78,14 +81,17 @@ export const test = base.extend<Fixtures, { clinic: LocalClinic }>({
           'Synthetic clinic setup',
         )
         checked(
-          await admin.from('branches').insert({
-            id: branchId,
-            clinic_id: id,
-            name: 'Synthetic Browser Branch',
-          }),
+          await admin.from('branches').insert([
+            { id: branchId, clinic_id: id, name: 'Synthetic Browser Branch' },
+            {
+              id: otherBranchId,
+              clinic_id: id,
+              name: 'Synthetic Browser Branch B',
+            },
+          ]),
           'Synthetic branch setup',
         )
-        await provide({ admin, id, branchId, name })
+        await provide({ admin, id, branchId, otherBranchId, name })
       } finally {
         checked(
           await admin.from('branches').delete().eq('clinic_id', id),
@@ -149,6 +155,18 @@ export const test = base.extend<Fixtures, { clinic: LocalClinic }>({
         },
       )
     } finally {
+      // The clinic is unique to this worker; remove only its synthetic patient
+      // records before deleting staff referenced by the new audit workflow.
+      for (const table of [
+        'audit_logs',
+        'patient_branch_access',
+        'patients',
+      ] as const) {
+        checked(
+          await clinic.admin.from(table).delete().eq('clinic_id', clinic.id),
+          `Synthetic ${table} cleanup`,
+        )
+      }
       let failed = false
       for (const id of userIds) {
         if (
@@ -178,11 +196,23 @@ export const test = base.extend<Fixtures, { clinic: LocalClinic }>({
       await page.getByRole('button', { name: 'Sign in', exact: true }).click()
     })
   },
+  expected404s: async ({ baseURL }, provide) => {
+    assert(baseURL, 'Expected HTTP errors require the configured test URL.')
+    await provide([])
+  },
   runtimeErrors: [
-    async ({ page }, provide) => {
+    async ({ page, expected404s }, provide) => {
       const errors: string[] = []
       page.on('pageerror', (error) => errors.push(error.message))
       page.on('console', (message) => {
+        if (
+          message.text().startsWith('Failed to load resource:') &&
+          message.text().includes('status of 404') &&
+          expected404s.some(
+            (path) => message.location().url === new URL(path, page.url()).href,
+          )
+        )
+          return
         if (message.type() === 'error') errors.push(message.text())
       })
       await provide()

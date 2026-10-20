@@ -1,6 +1,6 @@
 # Dental Clinic Management System
 
-An internal, invitation-only staff application scaffold. Includes the application shell, verified Supabase sessions, clinic/branch authorization, migrations, and a read-only database foundation. Business workflows remain unimplemented. Dashboard metrics are explicitly placeholders and never represent real patient or financial totals.
+An internal, invitation-only staff application with verified Supabase sessions, clinic/branch authorization, and patient management. Other business workflows and dashboard metrics remain placeholders.
 
 ## Run locally
 
@@ -91,7 +91,7 @@ tests/
 
 The ten module routes are `/dashboard`, `/patients`, `/appointments`, `/dental-charting`, `/treatments`, `/billing`, `/inventory`, `/staff`, `/reports`, and `/settings`. `/` redirects to the dashboard. Navigation is filtered by permissions; unavailable modules redirect to `/access-denied`.
 
-Only auth and dashboard currently have feature implementations. Add each business module under `src/features/<module>` when implementing it, keeping feature-specific schemas/services there and routes thin. Avoid creating empty modules or generic repositories in advance.
+Auth, dashboard, and patient management have feature implementations. Add each business module under `src/features/<module>` when implementing it, keeping feature-specific schemas/services there and routes thin. Avoid creating empty modules or generic repositories in advance.
 
 The shell includes a collapsible desktop sidebar, accessible mobile drawer, breadcrumbs, user/clinic context, local light/dark preference, loading/error/empty states, and confirmation dialogs. The reusable table uses the installed TanStack Table 9 API. Query is available through a per-request provider; initial workspace data uses Router loaders, with no redundant client cache or persistent private-data cache.
 
@@ -105,7 +105,15 @@ The shell includes a collapsible desktop sidebar, accessible mobile drawer, brea
 | Receptionist     | Dashboard, Patients, Appointments                                                                        |
 | Billing Staff    | Dashboard, Patients, Billing, Reports                                                                    |
 
-This matrix grants access to placeholders, not implemented workflows. Administrative privileges do not imply clinical access; a clinician who is also an administrator needs an additional dentist assignment for clinical permissions. Future report endpoints must distinguish clinical and financial data permissions.
+Patient reads are available to all five roles within their assigned scope. Administrators, dentists, and receptionists can register and edit patients and assign accessible branches. Dental assistants and billing staff have read-only patient access. Other business modules remain placeholders. Administrative privileges do not imply clinical access; a clinician who is also an administrator needs an additional dentist assignment for clinical permissions. Future report endpoints must distinguish clinical and financial data permissions.
+
+### Patient management
+
+`/patients` provides server-side name/contact search, branch filtering, sorting, and pagination (20 records per page). `/patients/new` registers patients; `/patients/:patientId` shows the complete demographic profile and accessible branch associations; `/patients/:patientId/edit` updates it. First/last name and at least one authorized branch are required. Birth date, middle name, gender, phone, email, and address can be left unrecorded. Birth dates must be valid calendar dates from 1900 through today.
+
+Saving checks for case-insensitive matching first/last names, matching email, or matching phone digits among accessible records. Staff review possible duplicates and explicitly confirm before saving a separate record or matching edit. No inaccessible record identities are revealed. Branch assignments are additive: existing associations are retained. A writer must already have write access to a patient before adding another authorized branch. Concurrent edits use `updated_at`; stale edits must reload before saving.
+
+Patient deletion, branch revocation, medical history, dental charting, and patient document workflows are not implemented. Authentication, staff provisioning, and existing development accounts are unchanged. For an existing local database, apply `pnpm db:migrate` before using the module; migrations do not reset or seed accounts.
 
 Staff currently belong to one clinic and can hold multiple explicit branch role assignments. Only administrators may have a clinic-wide assignment. Server resource authorization requires a clinic and branch scope; never trust a submitted clinic/branch identifier without deriving/checking the resource's actual scope. Navigation checks without a resource scope cannot authorize data operations.
 
@@ -113,13 +121,13 @@ Staff currently belong to one clinic and can hold multiple explicit branch role 
 
 The migration creates `clinics`, `branches`, `staff_profiles`, `staff_role_assignments`, `patients`, `patient_branch_access`, `appointments`, and `audit_logs` with UUIDs, timestamps, indexes, and composite foreign keys preventing cross-clinic references.
 
-Patients currently contain identity fields (first/last name) only. They belong to a clinic. A `patient_branch_access` link explicitly permits a branch to see that identity; an unlinked patient remains inaccessible, including to application administrators. Appointments belong to a branch and require a matching patient link. Billing staff cannot read appointment records. Future clinical details must use separate tables and stricter clinical policies; RLS is a row boundary, not field-level protection.
+Patients contain demographic and contact fields and belong to a clinic. A `patient_branch_access` link explicitly permits a branch to see those details; an unlinked patient remains inaccessible, including to application administrators. Appointments belong to a branch and require a matching patient link. Billing staff cannot read appointment records. Future clinical details must use separate tables and stricter clinical policies; RLS is a row boundary, not field-level protection.
 
 All eight exposed application tables have RLS and explicit grants. Inactive staff and inactive branch assignments lose access based on current database records, without waiting for JWT role refresh. Authorization helper functions live in unexposed `private`, fix `search_path`, and derive identity from `auth.uid()`.
 
-**All business-data mutations are denied to application users, including administrators.** No CRUD workflow is implemented yet. Add narrow mutation policies/grants with the corresponding validated, authorized, audited workflow. Keep staff provisioning in the trusted administrative procedure until its own workflow exists.
+**Direct table mutations remain denied to application users, including administrators.** Patient writes use the narrow `save_patient` RPC: its public entry point is a security invoker, while the private implementation derives the actor and clinic from the current authenticated staff profile, checks live branch/role assignments, validates details, and atomically saves the patient, branch links, and audit events. Reads continue through the existing RLS policies. Other business writes remain unavailable. Keep staff provisioning in the trusted administrative procedure until its own workflow exists.
 
-Audit records have no clinical payload column. Application users cannot insert, change, delete, or forge events. `AuditWriter` defines the future service boundary; each workflow must derive actor/clinic from verified context and append its event atomically with the mutation. Read/download auditing, retention, archival, and operational log redaction must be implemented with the corresponding workflows.
+Audit records have no clinical payload column. Application users cannot directly insert, change, delete, or forge events. The patient RPC appends `patient.created`, `patient.updated`, and `patient.branch_assigned` events in the mutation transaction, including the verified actor, clinic, patient ID, and branch for assignments. `AuditWriter` defines the future service boundary for other workflows. Read/download auditing, retention, archival, and operational log redaction must be implemented with the corresponding workflows.
 
 The `patient-documents` bucket is private, with a 10 MiB limit and PDF/JPEG/PNG types. No object policies are granted yet, so application upload/download/list access is denied. Future document workflows must bind objects to authorized patient records and use short-lived signed access where appropriate.
 
@@ -157,7 +165,7 @@ For a hosted development project, explicitly link the intended project with Supa
 
 For HTTP integration verification, start the local Supabase stack, configure `.env.local`, and build. In one terminal run `PORT=3037 HOST=127.0.0.1 pnpm start`; in another run `pnpm test:integration`. The script refuses remote targets, reads privileged **local test credentials into memory only**, creates synthetic staff/workspace fixtures, verifies the actual Auth and server-function flow, and removes those fixtures in `finally`. It never creates patient records or writes credentials/session state to disk.
 
-The browser suite requires the local Supabase stack, Supabase CLI, and an application built with that stack's public configuration. It provisions synthetic staff/workspace fixtures in the isolated local project and removes them after each test/worker. Privileged test credentials remain in Node memory and are never passed to the browser. No patient records are created by the browser tests.
+The browser suite requires the local Supabase stack, Supabase CLI, and an application built with that stack's public configuration. It provisions synthetic staff/workspace and patient fixtures in the isolated local project and removes them after each test/worker, including generated audit events. Privileged test credentials remain in Node memory and are never passed to the browser. Patient tests cover registration, validation, editing, duplicate confirmation, directory controls, branch isolation, read-only roles, branch assignment, audit persistence, stale edits, and mobile layout.
 
 ```sh
 pnpm exec playwright install chromium
@@ -200,7 +208,7 @@ Verified locally: dependency installation without peer conflicts, strict TypeScr
 
 Actual hosted Supabase integration and a deployed Vercel preview remain unverified because no hosted project/environment was supplied. Browser verification used Chromium; Firefox/WebKit and visual screenshot comparisons have not been run. A successful local build is not a claim of production clinical readiness.
 
-Next implementation phase: patient demographics CRUD with explicit branch linking, server-derived authorization, narrow RLS mutation policies, transactional audit events, real table/search behavior, and corresponding database/server tests. Follow with appointment scheduling. Detailed medical history, dental charting, treatments, billing, inventory, reporting, and notifications remain later phases.
+Patient management now includes demographics, explicit branch linking, server-derived authorization, transactional audits, directory filtering/search, duplicate warnings, and database/server tests. Browser verification adds nine patient workflow tests alongside the 17 existing auth/workspace tests, running against the production build and real local Supabase. Stale edits return an explicit HTTP 409 conflict instead of a retryable transaction error. Appointment scheduling, medical history, dental charting, treatments, billing, inventory, reporting, and notifications remain later phases.
 
 - Email: admin@dental.local
 - Password: Bi8nud4zFXGt3yUdLJrYfRKZ!a9
