@@ -1,0 +1,25 @@
+-- Run as a trusted database administrator after provisioning a Supabase Auth user.
+-- Replace NULL with that user's UUID. This is deliberately not an automatic seed.
+begin;
+do $$
+declare
+  staff_user_id uuid := null;
+  clinic_name text := 'Your clinic';
+  branch_name text := 'Main branch';
+  staff_name text := 'Clinic Administrator';
+  new_clinic_id uuid;
+  new_branch_id uuid;
+begin
+  if staff_user_id is null then
+    raise exception 'Set staff_user_id to the provisioned Auth user UUID before running this script.';
+  end if;
+  if not exists (select 1 from auth.users where id = staff_user_id) then
+    raise exception 'Provision the Auth user before creating staff access.';
+  end if;
+  insert into public.clinics(name, timezone) values (clinic_name, 'Asia/Manila') returning id into new_clinic_id;
+  insert into public.branches(clinic_id, name) values (new_clinic_id, branch_name) returning id into new_branch_id;
+  insert into public.staff_profiles(id, clinic_id, display_name) values (staff_user_id, new_clinic_id, staff_name);
+  insert into public.staff_role_assignments(staff_id, clinic_id, role) values (staff_user_id, new_clinic_id, 'administrator');
+end;
+$$;
+commit;
