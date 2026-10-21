@@ -386,6 +386,36 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      appointment_dentists: { Args: never; Returns: Json }
+      appointment_patients: {
+        Args: { p_branch: string; p_query?: string }
+        Returns: Json
+      }
+      appointment_schedule: {
+        Args: {
+          p_branch?: string
+          p_dentist?: string
+          p_from: string
+          p_page?: number
+          p_patient?: string
+          p_status?: Database["public"]["Enums"]["appointment_status"]
+          p_to: string
+        }
+        Returns: Json
+      }
+      save_appointment: {
+        Args: {
+          p_branch: string
+          p_dentist: string
+          p_duration: number
+          p_expected_updated_at?: string
+          p_id?: string
+          p_patient: string
+          p_start: string
+          p_status: Database["public"]["Enums"]["appointment_status"]
+        }
+        Returns: string
+      }
       save_patient: {
         Args: {
           p_allow_duplicate?: boolean

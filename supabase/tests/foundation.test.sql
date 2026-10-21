@@ -45,8 +45,18 @@ insert into patient_branch_access(patient_id, branch_id, clinic_id) values
   ('40000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001'),
   ('40000000-0000-0000-0000-000000000002', '20000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001'),
   ('40000000-0000-0000-0000-000000000003', '20000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000002');
-insert into appointments(clinic_id, branch_id, patient_id, starts_at, ends_at)
-  select clinic_id, branch_id, patient_id, '2030-01-01 01:00Z', '2030-01-01 02:00Z' from patient_branch_access;
+insert into appointments(clinic_id, branch_id, patient_id, dentist_staff_id, starts_at, ends_at)
+  select clinic_id, branch_id, patient_id,
+    case branch_id
+      when '20000000-0000-0000-0000-000000000001' then '30000000-0000-0000-0000-000000000002'::uuid
+      when '20000000-0000-0000-0000-000000000002' then '30000000-0000-0000-0000-000000000001'::uuid
+      else '30000000-0000-0000-0000-000000000008'::uuid
+    end, '2030-01-01 01:00Z', '2030-01-01 02:00Z' from patient_branch_access
+    where patient_id in (
+      '40000000-0000-0000-0000-000000000001',
+      '40000000-0000-0000-0000-000000000002',
+      '40000000-0000-0000-0000-000000000003'
+    );
 insert into audit_logs(clinic_id, actor_staff_id, action, resource_type)
   values ('10000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', 'test.event', 'test');
 insert into storage.objects(bucket_id, name) values ('patient-documents', 'synthetic-fixture.pdf');
@@ -136,8 +146,8 @@ select ok(not exists (
 ), 'Anonymous users cannot execute any private helper');
 
 select throws_ok($$insert into appointments(clinic_id, branch_id, patient_id, starts_at, ends_at) values ('10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001', '2030-01-01 02:00Z', '2030-01-01 01:00Z')$$, '23514', null, 'Appointments must end after their start');
-select throws_ok($$insert into appointments(clinic_id, branch_id, patient_id, starts_at, ends_at) values ('10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000002', '40000000-0000-0000-0000-000000000001', '2030-01-01 01:00Z', '2030-01-01 02:00Z')$$, '23503', null, 'Appointment patients require an explicit link to the scheduled branch');
-select throws_ok($$insert into appointments(clinic_id, branch_id, patient_id, dentist_staff_id, starts_at, ends_at) values ('10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000008', '2030-01-01 01:00Z', '2030-01-01 02:00Z')$$, '23503', null, 'Appointments cannot reference another clinic staff member');
+select throws_ok($$insert into appointments(clinic_id, branch_id, patient_id, dentist_staff_id, starts_at, ends_at) values ('10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000002', '40000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000003', '2030-01-01 01:00Z', '2030-01-01 02:00Z')$$, '23503', null, 'Appointment patients require an explicit link to the scheduled branch');
+select throws_ok($$insert into appointments(clinic_id, branch_id, patient_id, dentist_staff_id, starts_at, ends_at) values ('10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000008', '2030-01-01 03:00Z', '2030-01-01 04:00Z')$$, '23503', null, 'Appointments cannot reference another clinic staff member');
 select throws_ok($$insert into staff_role_assignments(staff_id, clinic_id, branch_id, role) values ('30000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', 'dentist')$$, '23505', null, 'Duplicate branch role assignments are rejected');
 select throws_ok($$insert into patients(clinic_id, first_name, last_name) values ('10000000-0000-0000-0000-000000000001', '   ', 'Synthetic')$$, '23514', null, 'Blank patient identities are rejected');
 select throws_ok($$delete from auth.users where id = '30000000-0000-0000-0000-000000000001'$$, '23503', null, 'Auth deletion cannot silently cascade away a staff identity');
