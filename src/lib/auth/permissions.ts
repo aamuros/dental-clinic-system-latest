@@ -12,6 +12,7 @@ export const permissions = [
   'dashboard.read',
   'patients.read',
   'patients.write',
+  'patients.branches.manage',
   'appointments.read',
   'clinical.read',
   'clinical.write',
@@ -30,6 +31,7 @@ export const rolePermissions: Record<StaffRole, readonly Permission[]> = {
     'dashboard.read',
     'patients.read',
     'patients.write',
+    'patients.branches.manage',
     'appointments.read',
     'billing.read',
     'inventory.read',
@@ -41,7 +43,6 @@ export const rolePermissions: Record<StaffRole, readonly Permission[]> = {
   dentist: [
     'dashboard.read',
     'patients.read',
-    'patients.write',
     'appointments.read',
     'clinical.read',
     'clinical.write',

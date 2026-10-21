@@ -294,7 +294,7 @@ test('hides other-branch patients and rejects direct profile access', async ({
   ).toHaveCount(0)
 })
 
-for (const role of ['billing_staff', 'dental_assistant'] as const) {
+for (const role of ['dentist', 'billing_staff', 'dental_assistant'] as const) {
   test(`${role} can read profiles but cannot register or edit patients`, async ({
     page,
     clinic,
@@ -328,6 +328,58 @@ for (const role of ['billing_staff', 'dental_assistant'] as const) {
     ).toBeVisible()
   })
 }
+
+test('multi-branch receptionists can choose an initial branch but cannot share an existing patient', async ({
+  page,
+  clinic,
+  createStaff,
+  signIn,
+}) => {
+  const [patient] = await seedPatients(clinic, [{ first_name: 'Reception' }])
+  const staff = await createStaff({ roles: ['receptionist'] })
+  const assignment = await clinic.admin.from('staff_role_assignments').insert({
+    staff_id: staff.id,
+    clinic_id: clinic.id,
+    branch_id: clinic.otherBranchId,
+    role: 'receptionist',
+  })
+  expect(assignment.error).toBeNull()
+  await signIn(staff)
+  await expect(page).toHaveURL(/\/dashboard$/)
+  await page.goto(`/patients/${patient!.id}/edit`)
+  await expect(page.getByRole('checkbox')).toHaveCount(1)
+  await expect(
+    page.getByRole('checkbox', {
+      name: 'Synthetic Browser Branch B',
+      exact: true,
+    }),
+  ).toHaveCount(0)
+  await expect(
+    page.getByText('Only authorized administrators can add branches.', {
+      exact: false,
+    }),
+  ).toBeVisible()
+  await page.getByLabel('First name').fill('Reception Updated')
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click()
+  await expect(page.getByText('Patient updated successfully.')).toBeVisible()
+  const links = await clinic.admin
+    .from('patient_branch_access')
+    .select('branch_id')
+    .eq('patient_id', patient!.id)
+  expect(links.data).toEqual([{ branch_id: clinic.branchId }])
+  await page.goto('/patients/new')
+  await page.getByLabel('Initial branch').selectOption(clinic.otherBranchId)
+  await fillIdentity(page, 'Chosen', 'Branch')
+  await page
+    .getByRole('button', { name: 'Register patient', exact: true })
+    .click()
+  await expect(page.getByText('Patient registered successfully.')).toBeVisible()
+  const createdLinks = await clinic.admin
+    .from('patient_branch_access')
+    .select('branch_id')
+    .eq('patient_id', currentPatientId(page))
+  expect(createdLinks.data).toEqual([{ branch_id: clinic.otherBranchId }])
+})
 
 test('adds a branch assignment without removing existing access', async ({
   page,
@@ -394,12 +446,32 @@ test('rejects a stale edit without overwriting another staff update', async ({
   await expect(page.getByRole('alert')).toContainText(
     'This patient has changed. Reload the profile before editing.',
   )
+  await expect(
+    page.getByRole('button', { name: 'Save changes', exact: true }),
+  ).toBeDisabled()
+  await expect(page.getByLabel('First name')).toBeDisabled()
   const stored = await clinic.admin
     .from('patients')
     .select('first_name')
     .eq('id', patient!.id)
     .single()
   expect(stored.data?.first_name).toBe('Newer')
+  await page
+    .getByRole('button', { name: 'Reload latest patient', exact: true })
+    .click()
+  await expect(page.getByLabel('First name')).toHaveValue('Newer')
+  await expect(
+    page.getByRole('button', { name: 'Save changes', exact: true }),
+  ).toBeEnabled()
+  await page.getByLabel('First name').fill('Reviewed')
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click()
+  await expect(page.getByText('Patient updated successfully.')).toBeVisible()
+  const audits = await clinic.admin
+    .from('audit_logs')
+    .select('id')
+    .eq('resource_id', patient!.id)
+    .eq('action', 'patient.updated')
+  expect(audits.data).toHaveLength(1)
 })
 
 test('patient registration and profiles work at mobile width without page overflow', async ({

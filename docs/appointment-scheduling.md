@@ -1,7 +1,5 @@
 # Appointment scheduling
 
-Implementation branch: `feat/appointment-scheduling`; worktree: `/private/tmp/dental-appointments`.
-
 The `/appointments` route provides day and Monday-based week views, date navigation, patient name/contact search, branch/dentist/status filters, and explicit pagination at 100 appointments. Appointments spanning midnight appear on each affected day. The booking/details panel uses existing shadcn controls, focus management, labelled fields, and announced loading/error/success states. Smaller screens show the week's days vertically.
 
 All feature code, schemas, time conversion, access checks, and TanStack server functions live in `src/features/appointments`. Existing authentication middleware supplies the verified staff member and cookie-authenticated Supabase client. No privileged keys are used by application code.
@@ -26,7 +24,7 @@ Successful writes append existing `audit_logs` events in the same transaction: `
 
 ## Integration and deployment
 
-1. Merge alongside Patient Management; do not replace or squash its independent changes. No Patient Management file, shared permission file, auth service, account, or patient data was modified by this branch.
+1. Keep appointment scheduling and Patient Management in their separate feature modules. Both modules reuse the existing patient identities, staff roles, branch authorization, and authenticated Supabase client.
 2. The shared changes are the existing appointment route, generated `src/types/database.ts`, and appointment fixtures in `supabase/tests/foundation.test.sql`. Resolve generated type conflicts by applying both modules' migrations to a local database and running `pnpm db:types`; never manually merge generated types. Regenerate routes with `pnpm generate-routes` if route generation conflicts.
 3. Apply the additive migration using the normal migration workflow (`pnpm db:migrate` locally). Production needs permission to install `btree_gist`. Constraint creation takes a table lock; coordinate migration timing with active schedulers.
 4. Before deployment, inspect legacy appointments for null dentists, invalid durations, or existing dentist overlaps. The new check constraints are NOT VALID to preserve existing rows, but apply to every subsequent write. The exclusion constraint validates existing rows and will deliberately fail rather than silently delete or alter conflicting appointments. Resolve any real conflicts through an approved data migration. Existing unassigned visits can be viewed; assign a valid dentist and schedule before managing them through the new workflow.
@@ -56,13 +54,13 @@ pnpm exec vitest run --config tests/integration/vitest.config.ts
 pnpm exec playwright test tests/e2e/appointments.spec.ts
 ```
 
-The integration/browser fixtures default to the existing local stack on port 55321. To use the separate appointment stack on port 56321, set `APPOINTMENT_SUPABASE_WORKDIR=/private/tmp/dental-appointments-db`. Browser tests require an already running app connected to that same database; use `PLAYWRIGHT_BASE_URL=http://127.0.0.1:3100` for the isolated worktree. They refuse remote database/application URLs. Existing shared browser fixtures remain unchanged.
+The integration/browser fixtures default to the existing local stack on port 55321. To use the separate appointment stack on port 56321, set `APPOINTMENT_SUPABASE_WORKDIR=/private/tmp/dental-appointments-db`. Browser tests require an already running app connected to that same database; use `PLAYWRIGHT_BASE_URL=http://127.0.0.1:3100` for the isolated local preview. They refuse remote database/application URLs. Existing shared browser fixtures remain unchanged.
 
 Verified results:
 
 - TypeScript and targeted ESLint pass.
 - 49 focused unit tests cover time zones/DST (including half-hour shifts and skipped dates), duration/search boundaries, mixed role scopes, dependency failures, source appointment authorization, precise timestamps, concurrency tokens, and safe errors.
-- 58 appointment database security/workflow checks pass; the 50 patient and 65 foundation checks pass against the isolated migrated database (173 total).
+- 58 appointment database security/workflow checks pass; the 74 patient and 65 foundation checks pass against the isolated database with both modules' migrations (197 total).
 - 18 real API integration tests pass, including eight simultaneous overlapping requests, cross-branch booking races, dentist swaps, independent/adjacent visits, rescheduling, stale updates, cancellation release, rollback/audits, privileged exclusion enforcement, live permission revocation, forged user metadata, clinic isolation, midnight boundaries, stable calendar pagination, and patient search beyond the first 20 results.
 - 11 Chromium Playwright workflows pass, including booking through cancellation, completion with fractional-second timestamps, filters/day/week views, stored UTC values/audits, overlap/stale errors, patient authorization, assistant access, keyboard focus restoration, mobile overflow, patient-search invalidation, cancellation after unsaved edits, failed-save recovery without duplicates, dentist deactivation, midnight boundaries, and calendar pagination.
 
@@ -74,3 +72,7 @@ Verified results:
 - Foundation SQL appointment fixtures select only their own synthetic patient IDs, allowing the regression checks to run safely alongside persistent demo clinics.
 
 All suites use disposable synthetic clinics and preserve the manual preview accounts and patient records. Browser verification currently covers Chromium; Firefox and WebKit have not been verified. Passing tests establish coverage of the listed cases, not proof that every possible defect has been eliminated.
+
+## Main branch integration verification
+
+The merged application passes `pnpm check` (typecheck, ESLint, and 140 unit tests), all 197 database security checks, the 18 appointment API integration tests, and a production build. The appointment API/concurrency suite is also included in the GitHub Actions database job. Local pnpm caches and preview credentials remain ignored.

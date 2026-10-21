@@ -112,7 +112,7 @@ describe('patient write permissions', () => {
       assignments: [{ clinicId: 'clinic', branchId, role }],
     }
   }
-  it.each(['administrator', 'dentist', 'receptionist'] as const)(
+  it.each(['administrator', 'receptionist'] as const)(
     'allows %s to write within their assigned branch',
     (role) => {
       expect(
@@ -135,7 +135,7 @@ describe('patient write permissions', () => {
       ).toBe(false)
     },
   )
-  it.each(['dental_assistant', 'billing_staff'] as const)(
+  it.each(['dentist', 'dental_assistant', 'billing_staff'] as const)(
     'keeps %s patient access read-only',
     (role) => {
       expect(
@@ -148,6 +148,29 @@ describe('patient write permissions', () => {
         hasPermission(staff(role), 'patients.write', {
           clinicId: 'clinic',
           branchId,
+        }),
+      ).toBe(false)
+    },
+  )
+  it.each([
+    'administrator',
+    'dentist',
+    'dental_assistant',
+    'receptionist',
+    'billing_staff',
+  ] as const)(
+    'restricts branch management for %s to explicit administrator scope',
+    (role) => {
+      expect(
+        hasPermission(staff(role), 'patients.branches.manage', {
+          clinicId: 'clinic',
+          branchId,
+        }),
+      ).toBe(role === 'administrator')
+      expect(
+        hasPermission(staff(role), 'patients.branches.manage', {
+          clinicId: 'clinic',
+          branchId: 'other',
         }),
       ).toBe(false)
     },

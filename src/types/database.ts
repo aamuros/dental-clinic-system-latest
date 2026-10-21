@@ -426,6 +426,30 @@ export type Database = {
         }
         Returns: Json
       }
+      search_patients: {
+        Args: { p_query: string }
+        Returns: {
+          address: string | null
+          birth_date: string | null
+          clinic_id: string
+          created_at: string
+          email: string | null
+          first_name: string
+          gender: string
+          id: string
+          last_name: string
+          middle_name: string | null
+          phone: string | null
+          search_text: string | null
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "patients"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
     }
     Enums: {
       appointment_status: "scheduled" | "confirmed" | "completed" | "cancelled"

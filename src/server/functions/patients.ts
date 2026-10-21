@@ -23,21 +23,25 @@ export const listPatientsFn = createServerFn({ method: 'GET' })
         clinicId: context.staff.clinicId,
         branchId: data.branchId,
       })
-    let query = context.supabase
-      .from('patients')
+    const source = data.q
+      ? context.supabase.rpc(
+          'search_patients',
+          { p_query: data.q },
+          { get: true, count: 'exact' },
+        )
+      : context.supabase.from('patients')
+    let query = source
       .select(
-        'id, first_name, middle_name, last_name, birth_date, phone, email, created_at, patient_branch_access!inner(branch_id, branches(id, name))',
+        // PostgREST needs the full composite RPC result when projecting embedded
+        // branch filters; a restricted projection incorrectly requests branch_id
+        // from patients. These are all authorized demographic fields.
+        '*, patient_branch_access!inner(branch_id, branches(id, name))',
         { count: 'exact' },
       )
       .eq('clinic_id', context.staff.clinicId)
     if (data.branchId)
       query = query.eq('patient_branch_access.branch_id', data.branchId)
-    // Treat search as literal text rather than PostgREST syntax or SQL wildcards.
-    if (data.q)
-      query = query.ilike(
-        'search_text',
-        `%${data.q.replace(/[\\%_]/g, '\\$&')}%`,
-      )
+    // Search resolves indexed, authorized candidates before reading rows under RLS.
     query =
       data.sort === 'name'
         ? query.order('last_name').order('first_name')
@@ -115,6 +119,35 @@ export const savePatientFn = createServerFn({ method: 'POST' })
         )
       )
         throw new Error('Patient unavailable or access denied.')
+      const existingBranches = new Set(
+        patient.patient_branch_access.map((link) => link.branch_id),
+      )
+      const additionalBranches = data.branchIds.filter(
+        (branchId) => !existingBranches.has(branchId),
+      )
+      if (
+        additionalBranches.length &&
+        !patient.patient_branch_access.some((link) =>
+          hasPermission(context.staff, 'patients.branches.manage', {
+            clinicId: context.staff.clinicId,
+            branchId: link.branch_id,
+          }),
+        )
+      )
+        throw new Error('Access denied.')
+      for (const branchId of additionalBranches)
+        authorize(context.staff, 'patients.branches.manage', {
+          clinicId: context.staff.clinicId,
+          branchId,
+        })
+    } else if (new Set(data.branchIds).size > 1) {
+      // Receptionists may choose one initial branch; sharing requires an
+      // administrator assignment covering every selected branch.
+      for (const branchId of data.branchIds)
+        authorize(context.staff, 'patients.branches.manage', {
+          clinicId: context.staff.clinicId,
+          branchId,
+        })
     }
     const { id, branchIds, expectedUpdatedAt, allowDuplicate, ...details } =
       data
@@ -129,6 +162,7 @@ export const savePatientFn = createServerFn({ method: 'POST' })
       if (result.error.code === 'PT409')
         return {
           error: 'This patient has changed. Reload the profile before editing.',
+          conflict: true as const,
           result: null,
         }
       if (result.error.code === '42501')

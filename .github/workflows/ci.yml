@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
+
+  database-and-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PLAYWRIGHT_BASE_URL: http://127.0.0.1:3037
+      SMOKE_BASE_URL: http://127.0.0.1:3037
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.105.0
+      - run: pnpm install --frozen-lockfile
+      - name: Start isolated local Supabase and apply migrations
+        run: supabase start -x studio,meta,realtime,edge-runtime,analytics,vector,imgproxy
+      - run: pnpm db:test
+      - name: Verify appointment API workflows and concurrent scheduling
+        run: pnpm exec vitest run --config tests/integration/vitest.config.ts
+      - run: supabase db lint --local --schema public,private --fail-on warning
+      - run: pnpm db:env
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Start production app
+        run: |
+          PORT=3037 HOST=127.0.0.1 pnpm start > "$RUNNER_TEMP/dental-app.log" 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --max-time 2 http://127.0.0.1:3037/login > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo 'Production app did not become ready.'
+          exit 1
+      - run: pnpm test:integration
+      - run: pnpm test:e2e
+      - name: Stop CI database
+        if: always()
+        run: supabase stop --no-backup

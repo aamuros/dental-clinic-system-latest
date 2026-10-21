@@ -132,6 +132,7 @@ test('books, views, confirms, reschedules, filters, cancels, and audits appointm
     page.getByRole('heading', { name: 'No appointments' }),
   ).toBeVisible()
   await page.getByRole('button', { name: 'Clear', exact: true }).click()
+  await expect(page.getByLabel('Search patient')).toHaveValue('')
   await page.getByLabel('Status', { exact: true }).selectOption('confirmed')
   await page
     .getByLabel('Branch', { exact: true })

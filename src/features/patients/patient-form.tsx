@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Link, useRouter } from '@tanstack/react-router'
 import { useServerFn } from '@tanstack/react-start'
@@ -29,20 +29,35 @@ export function PatientFormPage({
   const router = useRouter()
   const save = useServerFn(savePatientFn)
   const [duplicates, setDuplicates] = useState<DuplicateWarning | null>(null)
-  const branches = workspace.branches.filter((branch) =>
-    hasPermission(workspace.staff, 'patients.write', {
-      clinicId: workspace.clinic.id,
-      branchId: branch.id,
-    }),
-  )
+  const [conflict, setConflict] = useState(false)
   const existingBranches = new Set(
     patient?.patient_branch_access.map((link) => link.branch_id),
   )
+  const canManageBranches = patient
+    ? patient.patient_branch_access.some((link) =>
+        hasPermission(workspace.staff, 'patients.branches.manage', {
+          clinicId: workspace.clinic.id,
+          branchId: link.branch_id,
+        }),
+      )
+    : hasPermission(workspace.staff, 'patients.branches.manage')
+  const branches = workspace.branches.filter((branch) => {
+    const scope = { clinicId: workspace.clinic.id, branchId: branch.id }
+    return (
+      hasPermission(workspace.staff, 'patients.write', scope) &&
+      (!patient ||
+        existingBranches.has(branch.id) ||
+        (canManageBranches &&
+          hasPermission(workspace.staff, 'patients.branches.manage', scope)))
+    )
+  })
   const {
     register,
     handleSubmit,
     setError,
     clearErrors,
+    control,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<PatientFormValues>({
     resolver: zodResolver(patientFormSchema),
@@ -64,8 +79,10 @@ export function PatientFormPage({
           : [],
     },
   })
+  const selectedBranches = useWatch({ control, name: 'branchIds' })
 
   async function submit(values: PatientFormValues, allowDuplicate = false) {
+    if (conflict) return
     clearErrors('root')
     try {
       // Existing associations are additive and cannot be removed through this form.
@@ -87,6 +104,10 @@ export function PatientFormPage({
         },
       })
       if (response.error || !response.result) {
+        if ('conflict' in response && response.conflict) {
+          setConflict(true)
+          setDuplicates(null)
+        }
         setError('root', {
           message: response.error ?? 'Unable to save the patient.',
         })
@@ -173,7 +194,7 @@ export function PatientFormPage({
         onSubmit={handleSubmit((values) => submit(values))}
         onChange={() => setDuplicates(null)}
       >
-        <fieldset disabled={isSubmitting} className="space-y-8">
+        <fieldset disabled={isSubmitting || conflict} className="space-y-8">
           <section aria-labelledby="personal-details">
             <h2
               id="personal-details"
@@ -316,36 +337,62 @@ export function PatientFormPage({
               id="branches-help"
               className="mb-4 text-sm text-muted-foreground"
             >
-              Select the branches that will have access to this patient.
-              Existing assignments are retained.
+              {patient
+                ? canManageBranches
+                  ? 'Administrators can add authorized branches. Existing assignments are retained.'
+                  : 'Existing assignments are retained. Only authorized administrators can add branches.'
+                : canManageBranches
+                  ? 'Select an initial branch. Multiple branches require administrator access to each selected branch.'
+                  : 'Select one initial branch. Only authorized administrators can add more branches.'}
             </p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {branches.map((branch) => (
-                <Label
-                  key={branch.id}
-                  className="flex items-center gap-3 rounded-md border p-3 font-normal"
-                >
-                  <input
-                    type="checkbox"
-                    className="size-4 accent-primary"
-                    value={branch.id}
-                    {...register('branchIds')}
-                    readOnly={existingBranches.has(branch.id)}
-                    aria-disabled={existingBranches.has(branch.id)}
-                    onClick={(event) => {
-                      if (existingBranches.has(branch.id))
-                        event.preventDefault()
-                    }}
-                  />
-                  {branch.name}
-                  {existingBranches.has(branch.id) && (
-                    <span className="ml-auto text-xs text-muted-foreground">
-                      Assigned
-                    </span>
-                  )}
-                </Label>
-              ))}
-            </div>
+            {!patient && !canManageBranches ? (
+              <NativeSelect
+                aria-label="Initial branch"
+                value={selectedBranches[0] ?? ''}
+                onChange={(event) =>
+                  setValue(
+                    'branchIds',
+                    event.target.value ? [event.target.value] : [],
+                    { shouldValidate: true },
+                  )
+                }
+              >
+                <option value="">Select a branch</option>
+                {branches.map((branch) => (
+                  <option key={branch.id} value={branch.id}>
+                    {branch.name}
+                  </option>
+                ))}
+              </NativeSelect>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {branches.map((branch) => (
+                  <Label
+                    key={branch.id}
+                    className="flex items-center gap-3 rounded-md border p-3 font-normal"
+                  >
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-primary"
+                      value={branch.id}
+                      {...register('branchIds')}
+                      readOnly={existingBranches.has(branch.id)}
+                      aria-disabled={existingBranches.has(branch.id)}
+                      onClick={(event) => {
+                        if (existingBranches.has(branch.id))
+                          event.preventDefault()
+                      }}
+                    />
+                    {branch.name}
+                    {existingBranches.has(branch.id) && (
+                      <span className="ml-auto text-xs text-muted-foreground">
+                        Assigned
+                      </span>
+                    )}
+                  </Label>
+                ))}
+              </div>
+            )}
             {errors.branchIds && (
               <p
                 id="branches-error"
@@ -393,7 +440,7 @@ export function PatientFormPage({
               type="button"
               variant="outline"
               className="mt-4"
-              disabled={isSubmitting}
+              disabled={isSubmitting || conflict}
               onClick={handleSubmit((values) => submit(values, true))}
             >
               {patient ? 'Save changes anyway' : 'Save as a separate patient'}
@@ -403,6 +450,15 @@ export function PatientFormPage({
         {errors.root && (
           <div role="alert" className="space-y-2 text-sm text-destructive">
             <p>{errors.root.message}</p>
+            {conflict && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => window.location.reload()}
+              >
+                Reload latest patient
+              </Button>
+            )}
             {patient && (
               <Link
                 to="/patients/$patientId"
@@ -415,7 +471,10 @@ export function PatientFormPage({
           </div>
         )}
         <div className="flex flex-wrap gap-3 border-t pt-6">
-          <Button type="submit" disabled={isSubmitting || !!duplicates}>
+          <Button
+            type="submit"
+            disabled={isSubmitting || !!duplicates || conflict}
+          >
             {isSubmitting && (
               <LoaderCircle
                 className="animate-spin motion-reduce:animate-none"

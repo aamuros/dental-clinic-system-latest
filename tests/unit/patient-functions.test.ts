@@ -51,6 +51,7 @@ import {
 } from '@/server/functions/patients'
 
 const branchId = '20000000-0000-4000-8000-000000000001'
+const otherBranchId = '20000000-0000-4000-8000-000000000002'
 const patientId = '40000000-0000-4000-8000-000000000001'
 const updatedAt = '2026-10-20T01:00:00.123456+00:00'
 const values = {
@@ -79,10 +80,14 @@ beforeEach(() => {
     data: { id: patientId, patient_branch_access: [{ branch_id: branchId }] },
     error: null,
   })
-  mocks.rpc.mockResolvedValue({
-    data: { status: 'saved', id: patientId },
-    error: null,
-  })
+  mocks.rpc.mockImplementation((name) =>
+    name === 'search_patients'
+      ? mocks.query
+      : Promise.resolve({
+          data: { status: 'saved', id: patientId },
+          error: null,
+        }),
+  )
 })
 
 describe('patient directory server function', () => {
@@ -95,7 +100,13 @@ describe('patient directory server function', () => {
       'patient_branch_access.branch_id',
       branchId,
     )
-    expect(mocks.query.ilike).toHaveBeenCalledWith('search_text', '%Ana%')
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      'search_patients',
+      {
+        p_query: 'Ana',
+      },
+      { get: true, count: 'exact' },
+    )
     expect(mocks.query.order.mock.calls.map((args) => args[0])).toEqual([
       'last_name',
       'first_name',
@@ -103,14 +114,18 @@ describe('patient directory server function', () => {
     ])
     expect(mocks.query.range).toHaveBeenCalledWith(40, 59)
   })
-  it('escapes search wildcards', async () => {
+  it('passes literal search text to the indexed RPC without building a PostgREST filter', async () => {
     await listPatientsFn({
       data: { q: '50%_\\', branchId: '', sort: 'name', page: 1 },
     })
-    expect(mocks.query.ilike).toHaveBeenCalledWith(
-      'search_text',
-      '%50\\%\\_\\\\%',
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      'search_patients',
+      {
+        p_query: '50%_\\',
+      },
+      { get: true, count: 'exact' },
     )
+    expect(mocks.query.ilike).not.toHaveBeenCalled()
   })
   it('denies an unassigned branch before querying', async () => {
     await expect(
@@ -119,6 +134,7 @@ describe('patient directory server function', () => {
       }),
     ).rejects.toThrow('Access denied')
     expect(mocks.from).not.toHaveBeenCalled()
+    expect(mocks.rpc).not.toHaveBeenCalled()
   })
   it('sorts registration dates in the requested direction', async () => {
     await listPatientsFn({
@@ -200,13 +216,95 @@ describe('patient save server function', () => {
       p_allow_duplicate: false,
     })
   })
-  it('denies reader writes before calling the database', async () => {
-    mocks.staff.assignments[0]!.role = 'billing_staff'
-    await expect(savePatientFn({ data: values })).rejects.toThrow(
-      'Access denied',
-    )
+  it.each(['dentist', 'dental_assistant', 'billing_staff'] as const)(
+    'denies %s writes before calling the database',
+    async (role) => {
+      mocks.staff.assignments[0]!.role = role
+      await expect(savePatientFn({ data: values })).rejects.toThrow(
+        'Access denied',
+      )
+      expect(mocks.rpc).not.toHaveBeenCalled()
+    },
+  )
+  it('denies cross-branch sharing by a receptionist who can edit in both branches', async () => {
+    mocks.staff.assignments.push({
+      clinicId: 'clinic',
+      branchId: otherBranchId,
+      role: 'receptionist',
+    })
+    await expect(
+      savePatientFn({
+        data: {
+          ...values,
+          branchIds: [branchId, otherBranchId],
+          id: patientId,
+          expectedUpdatedAt: updatedAt,
+        },
+      }),
+    ).rejects.toThrow('Access denied')
     expect(mocks.rpc).not.toHaveBeenCalled()
   })
+  it('allows a multi-branch receptionist to choose one initial branch, but not several', async () => {
+    mocks.staff.assignments.push({
+      clinicId: 'clinic',
+      branchId: otherBranchId,
+      role: 'receptionist',
+    })
+    await expect(
+      savePatientFn({ data: { ...values, branchIds: [otherBranchId] } }),
+    ).resolves.toMatchObject({ error: null })
+    mocks.rpc.mockClear()
+    await expect(
+      savePatientFn({
+        data: { ...values, branchIds: [branchId, otherBranchId] },
+      }),
+    ).rejects.toThrow('Access denied')
+    expect(mocks.rpc).not.toHaveBeenCalled()
+  })
+  it('allows an administrator to share an accessible patient with an authorized branch', async () => {
+    mocks.staff.assignments = [
+      { clinicId: 'clinic', branchId: null, role: 'administrator' },
+    ]
+    await expect(
+      savePatientFn({
+        data: {
+          ...values,
+          branchIds: [otherBranchId],
+          id: patientId,
+          expectedUpdatedAt: updatedAt,
+        },
+      }),
+    ).resolves.toMatchObject({ error: null })
+    expect(mocks.rpc).toHaveBeenCalled()
+  })
+  it.each(['source', 'destination'])(
+    'requires administrator authority on the %s branch',
+    async (side) => {
+      mocks.staff.assignments = [
+        {
+          clinicId: 'clinic',
+          branchId,
+          role: side === 'source' ? 'receptionist' : 'administrator',
+        },
+        {
+          clinicId: 'clinic',
+          branchId: otherBranchId,
+          role: side === 'source' ? 'administrator' : 'receptionist',
+        },
+      ]
+      await expect(
+        savePatientFn({
+          data: {
+            ...values,
+            branchIds: [otherBranchId],
+            id: patientId,
+            expectedUpdatedAt: updatedAt,
+          },
+        }),
+      ).rejects.toThrow('Access denied')
+      expect(mocks.rpc).not.toHaveBeenCalled()
+    },
+  )
   it('requires write access to the existing patient before granting a new branch', async () => {
     mocks.query.maybeSingle.mockResolvedValue({
       data: { patient_branch_access: [{ branch_id: 'other' }] },
@@ -254,6 +352,7 @@ describe('patient save server function', () => {
       expect(await savePatientFn({ data: values })).toEqual({
         result: null,
         error: message,
+        ...(code === 'PT409' ? { conflict: true } : {}),
       })
     },
   )
