@@ -191,6 +191,13 @@ export const test = base.extend<Fixtures, { clinic: LocalClinic }>({
   signIn: async ({ page }, provide) => {
     await provide(async (staff) => {
       await page.goto('/login')
+      // SSR controls are visible before React owns the form. Submitting sooner
+      // triggers native navigation instead of exercising the sign-in handler.
+      await page.waitForFunction(() =>
+        Object.keys(document.querySelector('form') ?? {}).some((key) =>
+          key.startsWith('__reactFiber$'),
+        ),
+      )
       await page.getByRole('textbox', { name: 'Work email' }).fill(staff.email)
       await page.getByLabel('Password', { exact: true }).fill(staff.password)
       await page.getByRole('button', { name: 'Sign in', exact: true }).click()

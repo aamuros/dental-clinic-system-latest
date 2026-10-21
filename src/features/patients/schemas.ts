@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { clinicDate } from '@/features/appointments/time'
 
 export const genders = [
   'unspecified',
@@ -15,15 +16,22 @@ export const genderLabels: Record<(typeof genders)[number], string> = {
   prefer_not_to_say: 'Prefer not to say',
 }
 
-export function isValidBirthDate(value: string) {
+function isCalendarBirthDate(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
   const date = new Date(`${value}T00:00:00Z`)
   return (
     !Number.isNaN(date.getTime()) &&
     date.toISOString().slice(0, 10) === value &&
-    value >= '1900-01-01' &&
-    value <= new Date().toISOString().slice(0, 10)
+    value >= '1900-01-01'
   )
+}
+
+export function isValidBirthDate(
+  value: string,
+  timezone: string,
+  now = new Date(),
+) {
+  return isCalendarBirthDate(value) && value <= clinicDate(timezone, now)
 }
 
 export const patientDetailsSchema = z.object({
@@ -33,8 +41,8 @@ export const patientDetailsSchema = z.object({
   birthDate: z
     .string()
     .refine(
-      (value) => value === '' || isValidBirthDate(value),
-      'Enter a valid birth date from 1900 through today.',
+      (value) => value === '' || isCalendarBirthDate(value),
+      'Enter a valid birth date from 1900 through today in the clinic time zone.',
     ),
   gender: z.enum(genders),
   phone: z
@@ -62,10 +70,24 @@ export const patientDetailsSchema = z.object({
   address: z.string().trim().max(500),
 })
 
-export const patientFormSchema = patientDetailsSchema.extend({
+// The transport schema validates calendar dates. The current-date limit needs
+// trusted clinic context and is applied in the form and again on the server.
+const patientFormSchema = patientDetailsSchema.extend({
   branchIds: z.array(z.uuid()).min(1, 'Select at least one branch.').max(100),
 })
 export type PatientFormValues = z.infer<typeof patientFormSchema>
+
+export function createPatientFormSchema(timezone: string) {
+  return patientFormSchema.refine(
+    (value) =>
+      value.birthDate === '' || isValidBirthDate(value.birthDate, timezone),
+    {
+      path: ['birthDate'],
+      message:
+        'Enter a valid birth date from 1900 through today in the clinic time zone.',
+    },
+  )
+}
 
 export const savePatientSchema = patientFormSchema
   .extend({

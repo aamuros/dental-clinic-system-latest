@@ -3,6 +3,8 @@ import { appointmentFixture } from '../support/appointment-fixture'
 import type { AppointmentFixture } from '../support/appointment-fixture'
 import type { Database } from '@/types/database'
 import { createClient } from '@supabase/supabase-js'
+import { createPatientFormSchema } from '@/features/patients/schemas'
+import { addDays, clinicDate } from '@/features/appointments/time'
 
 let fixture: AppointmentFixture
 beforeAll(async () => {
@@ -605,4 +607,196 @@ describe('database conflict enforcement under contention', () => {
     })
     expect(result.error?.code).toBe('23P01')
   })
+})
+
+describe('patient search and scheduling regressions over the real API', () => {
+  it('rejects unchanged Confirmed → Scheduled and permits an actual reschedule', async () => {
+    const created = await fixture.receptionist.client.rpc(
+      'save_appointment',
+      booking('2090-08-01T01:00Z'),
+    )
+    expect(created.error).toBeNull()
+    let row = await current(created.data!)
+    expect(
+      (
+        await fixture.receptionist.client.rpc(
+          'save_appointment',
+          booking(row.starts_at, {
+            p_id: row.id,
+            p_expected_updated_at: row.updated_at,
+            p_status: 'confirmed',
+          }),
+        )
+      ).error,
+    ).toBeNull()
+    row = await current(row.id)
+    expect(
+      (
+        await fixture.receptionist.client.rpc(
+          'save_appointment',
+          booking(row.starts_at, {
+            p_id: row.id,
+            p_expected_updated_at: row.updated_at,
+          }),
+        )
+      ).error?.code,
+    ).toBe('22023')
+    expect(
+      (
+        await fixture.receptionist.client.rpc(
+          'save_appointment',
+          booking('2090-08-01T02:00Z', {
+            p_id: row.id,
+            p_expected_updated_at: row.updated_at,
+          }),
+        )
+      ).error,
+    ).toBeNull()
+    expect((await current(row.id)).status).toBe('scheduled')
+  })
+
+  it('uses normalized literal phone searches in every RPC without exposing another branch', async () => {
+    expect(
+      (
+        await fixture.admin
+          .from('patients')
+          .update({
+            phone: '+63 (917) 123-4567',
+            email: 'search@example.test',
+          })
+          .in('id', [fixture.patientId, fixture.hiddenPatientId])
+      ).error,
+    ).toBeNull()
+    expect(
+      (
+        await fixture.receptionist.client.rpc(
+          'save_appointment',
+          booking('2090-08-02T01:00Z'),
+        )
+      ).error,
+    ).toBeNull()
+    expect(
+      (
+        await fixture.dentist.client.rpc(
+          'save_appointment',
+          booking('2090-08-02T02:00Z', {
+            p_branch: fixture.otherBranchId,
+            p_patient: fixture.hiddenPatientId,
+          }),
+        )
+      ).error,
+    ).toBeNull()
+    for (const [query, matches] of [
+      ['9171234567', true],
+      ['917 123 4567', true],
+      ['+63 (917) 123-4567', true],
+      ['1234567', true],
+      ['0917', false],
+      ['123%', false],
+      ['123_', false],
+      ['123!4567', false],
+      ['Visible Appointment', true],
+      ['SEARCH@EXAMPLE.TEST', true],
+    ] as const) {
+      const directory = await fixture.receptionist.client.rpc(
+        'search_patients',
+        { p_query: query },
+      )
+      expect(directory.error).toBeNull()
+      expect(directory.data?.map((row) => row.id)).toEqual(
+        matches ? [fixture.patientId] : [],
+      )
+      const patients = await fixture.receptionist.client.rpc(
+        'appointment_patients',
+        { p_branch: fixture.branchId, p_query: query },
+      )
+      expect(patients.error).toBeNull()
+      expect(patients.data).toMatchObject({
+        patients: matches
+          ? [{ id: fixture.patientId, name: 'Visible Appointment Patient' }]
+          : [],
+      })
+      const calendar = await fixture.receptionist.client.rpc(
+        'appointment_schedule',
+        {
+          p_from: '2090-08-02T00:00Z',
+          p_to: '2090-08-03T00:00Z',
+          p_patient: query,
+        },
+      )
+      expect(calendar.error).toBeNull()
+      expect(calendar.data).toMatchObject({ total: matches ? 1 : 0 })
+    }
+    expect(
+      (
+        await fixture.admin
+          .from('patients')
+          .select('phone')
+          .eq('id', fixture.patientId)
+          .single()
+      ).data?.phone,
+    ).toBe('+63 (917) 123-4567')
+  })
+})
+
+describe('frontend and database birth-date consistency', () => {
+  it.each(['Asia/Manila', 'America/Los_Angeles'])(
+    'uses the configured %s calendar date on both sides',
+    async (timezone) => {
+      expect(
+        (
+          await fixture.admin
+            .from('clinics')
+            .update({ timezone })
+            .eq('id', fixture.clinicId)
+        ).error,
+      ).toBeNull()
+      try {
+        const today = clinicDate(timezone)
+        const schema = createPatientFormSchema(timezone)
+        const details = {
+          firstName: `Birth date ${timezone}`,
+          middleName: '',
+          lastName: 'Regression',
+          birthDate: today,
+          gender: 'unspecified',
+          phone: '',
+          email: '',
+          address: '',
+        }
+        expect(
+          schema.safeParse({ ...details, branchIds: [fixture.branchId] })
+            .success,
+        ).toBe(true)
+        const saved = await fixture.receptionist.client.rpc('save_patient', {
+          p_details: details,
+          p_branch_ids: [fixture.branchId],
+        })
+        expect(saved.error).toBeNull()
+        expect(saved.data).toMatchObject({ status: 'saved' })
+        const future = { ...details, birthDate: addDays(today, 1) }
+        expect(
+          schema.safeParse({ ...future, branchIds: [fixture.branchId] })
+            .success,
+        ).toBe(false)
+        expect(
+          (
+            await fixture.receptionist.client.rpc('save_patient', {
+              p_details: future,
+              p_branch_ids: [fixture.branchId],
+            })
+          ).error?.code,
+        ).toBe('22023')
+      } finally {
+        expect(
+          (
+            await fixture.admin
+              .from('clinics')
+              .update({ timezone: 'Asia/Manila' })
+              .eq('id', fixture.clinicId)
+          ).error,
+        ).toBeNull()
+      }
+    },
+  )
 })

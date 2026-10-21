@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { localDateTime } from './time'
 
 export const appointmentStatuses = [
   'scheduled',
@@ -82,6 +83,44 @@ export const appointmentSchema = z.object({
   branch_name: z.string(),
 })
 export type Appointment = z.infer<typeof appointmentSchema>
+
+// Match private.save_appointment's scheduling tuple. Preserve exact stored
+// instants when the minute-precision date/time input has not been edited.
+export function appointmentScheduleChanged(
+  appointment: Appointment,
+  values: SaveAppointment,
+  timezone: string,
+) {
+  return (
+    appointment.branch_id !== values.branchId ||
+    appointment.patient_id !== values.patientId ||
+    appointment.dentist_staff_id !== values.dentistId ||
+    localDateTime(appointment.starts_at, timezone) !== values.localStart ||
+    (Date.parse(appointment.ends_at) - Date.parse(appointment.starts_at)) /
+      60_000 !==
+      values.duration
+  )
+}
+
+export function availableAppointmentStatuses(
+  appointment: Appointment | null,
+  values: SaveAppointment,
+  timezone: string,
+  now = Date.now(),
+): SaveAppointment['status'][] {
+  if (!appointment) return ['scheduled']
+  if (appointment.status === 'completed' || appointment.status === 'cancelled')
+    return []
+  const changed = appointmentScheduleChanged(appointment, values, timezone)
+  return appointmentStatuses.filter((status) => {
+    if (status === 'scheduled')
+      return appointment.status !== 'confirmed' || changed
+    if (status === 'completed')
+      return !changed && Date.parse(appointment.starts_at) <= now
+    if (status === 'cancelled') return !changed
+    return true
+  })
+}
 export const scheduleResultSchema = z.object({
   appointments: z.array(appointmentSchema),
   total: z.number(),

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => {
     order: vi.fn().mockReturnThis(),
     range: vi.fn(),
     maybeSingle: vi.fn(),
+    single: vi.fn(),
   }
   return {
     query,
@@ -75,6 +76,10 @@ beforeEach(() => {
     isActive: true,
     assignments: [{ clinicId: 'clinic', branchId, role: 'receptionist' }],
   }
+  mocks.query.single.mockResolvedValue({
+    data: { timezone: 'Asia/Manila' },
+    error: null,
+  })
   mocks.query.range.mockResolvedValue({ data: [], count: 0, error: null })
   mocks.query.maybeSingle.mockResolvedValue({
     data: { id: patientId, patient_branch_access: [{ branch_id: branchId }] },
@@ -356,4 +361,45 @@ describe('patient save server function', () => {
       })
     },
   )
+})
+
+describe('patient save clinic time zone', () => {
+  it.each([
+    ['Asia/Manila', '2026-10-22', null],
+    ['Asia/Manila', '2026-10-23', 'Enter a valid birth date'],
+    ['America/Los_Angeles', '2026-10-21', null],
+    ['America/Los_Angeles', '2026-10-22', 'Enter a valid birth date'],
+  ])(
+    'validates %s date %s using trusted clinic configuration',
+    async (timezone, birthDate, error) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-10-22T00:30:00Z'))
+      mocks.query.single.mockResolvedValue({ data: { timezone }, error: null })
+      try {
+        const result = await savePatientFn({
+          data: { ...values, birthDate, ...{ timezone: 'forged' } },
+        })
+        expect(mocks.query.eq).toHaveBeenCalledWith('id', 'clinic')
+        if (error) {
+          expect(result.error).toContain(error)
+          expect(mocks.rpc).not.toHaveBeenCalled()
+        } else {
+          expect(result.error).toBeNull()
+          expect(mocks.rpc).toHaveBeenCalled()
+        }
+      } finally {
+        vi.useRealTimers()
+      }
+    },
+  )
+  it('fails safely when the clinic time zone cannot be loaded', async () => {
+    mocks.query.single.mockResolvedValue({
+      data: null,
+      error: { message: 'Private details' },
+    })
+    await expect(
+      savePatientFn({ data: { ...values, birthDate: '2000-01-01' } }),
+    ).rejects.toThrow('Unable to load the clinic time zone')
+    expect(mocks.rpc).not.toHaveBeenCalled()
+  })
 })

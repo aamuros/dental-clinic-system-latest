@@ -27,6 +27,7 @@ insert into patients(id,clinic_id,first_name,last_name) values
 ('42000000-0000-4000-8000-000000000001','12000000-0000-4000-8000-000000000001','Visible','Patient'),
 ('42000000-0000-4000-8000-000000000002','12000000-0000-4000-8000-000000000001','Hidden','Patient'),
 ('42000000-0000-4000-8000-000000000003','12000000-0000-4000-8000-000000000002','Other','Patient');
+update patients set phone = '+63 (917) 123-4567', email = 'patient@example.test';
 insert into patient_branch_access(patient_id,branch_id,clinic_id) values
 ('42000000-0000-4000-8000-000000000001','22000000-0000-4000-8000-000000000001','12000000-0000-4000-8000-000000000001'),
 ('42000000-0000-4000-8000-000000000001','22000000-0000-4000-8000-000000000002','12000000-0000-4000-8000-000000000001'),
@@ -56,6 +57,16 @@ select is(jsonb_array_length(public.appointment_dentists()),2,'Narrow lookup exp
 select is(jsonb_array_length(public.appointment_patients('22000000-0000-4000-8000-000000000001')->'patients'),1,'Patient lookup excludes other-branch patients');
 select is(jsonb_array_length(public.appointment_patients('22000000-0000-4000-8000-000000000002')->'patients'),0,'Patient lookup denies unauthorized branch');
 select is(jsonb_array_length(public.appointment_patients('22000000-0000-4000-8000-000000000001','%')->'patients'),0,'Patient search treats wildcard literally');
+select is(jsonb_array_length(public.appointment_patients('22000000-0000-4000-8000-000000000001','9171234567')->'patients'),1,'Booking patient search: 9171234567');
+select is(jsonb_array_length(public.appointment_patients('22000000-0000-4000-8000-000000000001','917 123 4567')->'patients'),1,'Booking patient search: 917 123 4567');
+select is(jsonb_array_length(public.appointment_patients('22000000-0000-4000-8000-000000000001','1234567')->'patients'),1,'Booking patient search: 1234567');
+select is(jsonb_array_length(public.appointment_patients('22000000-0000-4000-8000-000000000001','0917')->'patients'),0,'Booking patient search: 0917');
+select is(jsonb_array_length(public.appointment_patients('22000000-0000-4000-8000-000000000001','123%')->'patients'),0,'Booking patient search: 123%');
+select is(jsonb_array_length(public.appointment_patients('22000000-0000-4000-8000-000000000001','123_')->'patients'),0,'Booking patient search: 123_');
+select is(jsonb_array_length(public.appointment_patients('22000000-0000-4000-8000-000000000001','123!4567')->'patients'),0,'Booking patient search: 123!4567');
+select is(jsonb_array_length(public.appointment_patients('22000000-0000-4000-8000-000000000001','PATIENT@EXAMPLE.TEST')->'patients'),1,'Booking patient search: PATIENT@EXAMPLE.TEST');
+select is(jsonb_array_length(public.appointment_patients('22000000-0000-4000-8000-000000000001','visible PATIENT')->'patients'),1,'Booking patient search: visible PATIENT');
+select is(jsonb_array_length(public.appointment_patients('22000000-0000-4000-8000-000000000002','9171234567')->'patients'),0,'Normalized lookup still denies unauthorized branch');
 select throws_ok($$select pg_temp.book('2090-02-01T01:15Z')$$,'23P01',null,'Overlapping insert rejected');
 select throws_ok($$select pg_temp.book('2090-02-01T00:45Z',60)$$,'23P01',null,'Containing overlap rejected');
 select throws_ok($$select pg_temp.book(branch=>'22000000-0000-4000-8000-000000000002')$$,'42501',null,'Other branch booking denied');
@@ -81,6 +92,14 @@ select is((public.appointment_schedule('2090-02-01Z','2090-02-02Z',p_status=>'co
 select is((public.appointment_schedule('2090-02-01Z','2090-02-02Z',p_dentist=>'32000000-0000-4000-8000-000000000006')->>'total')::int,1,'Filters dentist');
 select is((public.appointment_schedule('2090-02-01Z','2090-02-02Z',p_patient=>'Visible')->>'total')::int,3,'Filters patient');
 select is((public.appointment_schedule('2090-02-01Z','2090-02-02Z',p_patient=>'%')->>'total')::int,0,'Calendar treats wildcards literally');
+select is((public.appointment_schedule('2090-02-01Z','2090-02-02Z',p_patient=>'9171234567')->>'total')::int,3,'Calendar patient search: 9171234567');
+select is((public.appointment_schedule('2090-02-01Z','2090-02-02Z',p_patient=>'917 123 4567')->>'total')::int,3,'Calendar patient search: 917 123 4567');
+select is((public.appointment_schedule('2090-02-01Z','2090-02-02Z',p_patient=>'1234567')->>'total')::int,3,'Calendar patient search: 1234567');
+select is((public.appointment_schedule('2090-02-01Z','2090-02-02Z',p_patient=>'0917')->>'total')::int,0,'Calendar patient search: 0917');
+select is((public.appointment_schedule('2090-02-01Z','2090-02-02Z',p_patient=>'123%')->>'total')::int,0,'Calendar patient search: 123%');
+select is((public.appointment_schedule('2090-02-01Z','2090-02-02Z',p_patient=>'123_')->>'total')::int,0,'Calendar patient search: 123_');
+select is((public.appointment_schedule('2090-02-01Z','2090-02-02Z',p_patient=>'123!4567')->>'total')::int,0,'Calendar patient search: 123!4567');
+select is((public.appointment_schedule('2090-02-01Z','2090-02-02Z',p_patient=>'PATIENT@EXAMPLE.TEST')->>'total')::int,3,'Calendar patient search: PATIENT@EXAMPLE.TEST');
 select throws_ok($$select public.appointment_schedule('2090-01-01Z','2090-02-02Z')$$,'22023',null,'Unbounded calendar requests denied');
 select throws_ok($$insert into appointments(clinic_id,branch_id,patient_id,dentist_staff_id,starts_at,ends_at) values('12000000-0000-4000-8000-000000000001','22000000-0000-4000-8000-000000000001','42000000-0000-4000-8000-000000000001','32000000-0000-4000-8000-000000000003','2090-02-02T01:00Z','2090-02-02T01:30Z')$$,'42501',null,'Direct unaudited insert denied');
 select throws_ok($$update appointments set status='cancelled'$$,'42501',null,'Direct unaudited update denied');
@@ -116,5 +135,12 @@ update appointments set starts_at=now()-interval '1 hour',ends_at=now()-interval
 set local role authenticated;
 select lives_ok($$select pg_temp.book((select starts_at from appointments where id=(select id from saved where label='adjacent')),status=>'completed',id=>(select id from saved where label='adjacent'))$$,'Past appointment can be completed');
 select throws_ok($$select pg_temp.book((select starts_at from appointments where id=(select id from saved where label='adjacent')),status=>'cancelled',id=>(select id from saved where label='adjacent'))$$,'22023',null,'Completed appointment immutable');
+insert into saved values ('transition',pg_temp.book('2090-03-01T01:00Z'));
+select lives_ok($$select pg_temp.book('2090-03-01T01:00Z',status=>'confirmed',id=>(select id from saved where label='transition'))$$,'Transition test confirmation');
+select throws_ok($$select pg_temp.book('2090-03-01T01:00Z',status=>'scheduled',id=>(select id from saved where label='transition'))$$,'22023',null,'Confirmed with unchanged schedule cannot become Scheduled');
+select lives_ok($$select pg_temp.book('2090-03-01T02:00Z',status=>'scheduled',id=>(select id from saved where label='transition'))$$,'Confirmed rescheduled appointment can become Scheduled');
+select is((select status::text from appointments where id=(select id from saved where label='transition')),'scheduled','Rescheduled status persisted');
+select lives_ok($$select pg_temp.book('2090-03-01T02:00Z',status=>'confirmed',id=>(select id from saved where label='transition'))$$,'Rescheduled appointment can be confirmed again');
+select throws_ok($$select pg_temp.book('2090-03-01T03:00Z',status=>'cancelled',id=>(select id from saved where label='transition'))$$,'22023',null,'Cannot combine cancellation and rescheduling');
 select * from finish();
 rollback;

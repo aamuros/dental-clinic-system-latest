@@ -13,7 +13,8 @@ import { hasPermission } from '@/lib/auth/permissions'
 import { savePatientFn } from '@/server/functions/patients'
 import type { Patient } from '@/server/functions/patients'
 import type { Workspace } from '@/types/auth'
-import { genderLabels, genders, patientFormSchema } from './schemas'
+import { genderLabels, genders, createPatientFormSchema } from './schemas'
+import { clinicDate } from '@/features/appointments/time'
 import type { PatientFormValues, SavePatientResult } from './schemas'
 import { canEditPatient, formatBirthDate } from './patient-utils'
 
@@ -60,7 +61,7 @@ export function PatientFormPage({
     setValue,
     formState: { errors, isSubmitting },
   } = useForm<PatientFormValues>({
-    resolver: zodResolver(patientFormSchema),
+    resolver: zodResolver(createPatientFormSchema(workspace.clinic.timezone)),
     defaultValues: {
       firstName: patient?.first_name ?? '',
       middleName: patient?.middle_name ?? '',
@@ -171,7 +172,7 @@ export function PatientFormPage({
       autoComplete: 'bday',
       type: 'date',
       min: '1900-01-01',
-      max: new Date().toISOString().slice(0, 10),
+      max: clinicDate(workspace.clinic.timezone),
     },
   ] as const
 

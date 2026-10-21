@@ -2,6 +2,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { notFound } from '@tanstack/react-router'
 import {
   directorySchema,
+  isValidBirthDate,
   patientIdSchema,
   savePatientSchema,
   saveResultSchema,
@@ -149,6 +150,23 @@ export const savePatientFn = createServerFn({ method: 'POST' })
           branchId,
         })
     }
+    if (data.birthDate) {
+      const clinic = await context.supabase
+        .from('clinics')
+        .select('timezone')
+        .eq('id', context.staff.clinicId)
+        .single()
+      if (clinic.error || !clinic.data)
+        throw new Error(
+          'Unable to load the clinic time zone. Please try again.',
+        )
+      if (!isValidBirthDate(data.birthDate, clinic.data.timezone))
+        return {
+          error:
+            'Enter a valid birth date from 1900 through today in the clinic time zone.',
+          result: null,
+        }
+    }
     const { id, branchIds, expectedUpdatedAt, allowDuplicate, ...details } =
       data
     const result = await context.supabase.rpc('save_patient', {
@@ -169,6 +187,12 @@ export const savePatientFn = createServerFn({ method: 'POST' })
         return {
           error:
             'Patient or branch access has changed. Reload the page and try again.',
+          result: null,
+        }
+      if (['22023', '22007', '22008'].includes(result.error.code))
+        return {
+          error:
+            'Check the patient details and birth date using the clinic time zone.',
           result: null,
         }
       return {

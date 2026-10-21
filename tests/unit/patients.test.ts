@@ -1,12 +1,14 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   directorySchema,
   isValidBirthDate,
-  patientFormSchema,
+  createPatientFormSchema,
   savePatientSchema,
 } from '@/features/patients/schemas'
 import { hasPermission } from '@/lib/auth/permissions'
 import type { StaffAccess, StaffRole } from '@/types/auth'
+
+const patientFormSchema = createPatientFormSchema('Asia/Manila')
 
 const branchId = '20000000-0000-4000-8000-000000000001'
 const patient = {
@@ -49,7 +51,7 @@ describe('patient validation', () => {
     '2999-01-01',
     '01/01/2000',
   ])('rejects invalid or out-of-range birth date %s', (birthDate) => {
-    expect(isValidBirthDate(birthDate)).toBe(false)
+    expect(isValidBirthDate(birthDate, 'Asia/Manila')).toBe(false)
     expect(patientFormSchema.safeParse({ ...patient, birthDate }).success).toBe(
       false,
     )
@@ -175,4 +177,43 @@ describe('patient write permissions', () => {
       ).toBe(false)
     },
   )
+})
+
+describe('clinic-local birth dates', () => {
+  afterEach(() => vi.useRealTimers())
+  it.each([
+    ['Asia/Manila', '2026-10-21T15:59:59Z', '2026-10-21', '2026-10-22'],
+    ['Asia/Manila', '2026-10-21T16:00:00Z', '2026-10-22', '2026-10-23'],
+    ['America/Los_Angeles', '2026-10-22T06:59:59Z', '2026-10-21', '2026-10-22'],
+    ['America/Los_Angeles', '2026-10-22T07:00:00Z', '2026-10-22', '2026-10-23'],
+    ['Pacific/Kiritimati', '2026-12-31T10:00:00Z', '2027-01-01', '2027-01-02'],
+  ])(
+    'uses %s at %s independently of the browser time zone',
+    (timezone, instant, today, tomorrow) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date(instant))
+      const schema = createPatientFormSchema(timezone)
+      expect(isValidBirthDate(today, timezone)).toBe(true)
+      expect(schema.safeParse({ ...patient, birthDate: today }).success).toBe(
+        true,
+      )
+      expect(isValidBirthDate(tomorrow, timezone)).toBe(false)
+      expect(
+        schema.safeParse({ ...patient, birthDate: tomorrow }).success,
+      ).toBe(false)
+    },
+  )
+  it.each([
+    ['1900-01-01', true],
+    ['1899-12-31', false],
+    ['1900-02-29', false],
+    ['2000-02-29', true],
+    ['2024-02-29', true],
+    ['2025-02-29', false],
+    ['2026-04-31', false],
+  ])('validates the calendar date %s', (value, valid) => {
+    expect(
+      isValidBirthDate(value, 'Asia/Manila', new Date('2026-10-21T16:00Z')),
+    ).toBe(valid)
+  })
 })

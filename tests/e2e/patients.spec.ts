@@ -44,8 +44,17 @@ async function fillIdentity(
   firstName = 'Ana',
   lastName = 'Santos',
 ) {
+  await waitForPatientForm(page)
   await page.getByLabel('First name').fill(firstName)
   await page.getByLabel('Last name').fill(lastName)
+}
+
+async function waitForPatientForm(page: Page) {
+  await page.waitForFunction(() =>
+    Object.keys(document.querySelector('form') ?? {}).some((key) =>
+      key.startsWith('__reactFiber$'),
+    ),
+  )
 }
 
 function currentPatientId(page: Page) {
@@ -71,6 +80,7 @@ test('registers, validates, edits, and audits a complete patient profile', async
     .getByRole('link', { name: 'Register patient', exact: true })
     .first()
     .click()
+  await waitForPatientForm(page)
   await page
     .getByRole('button', { name: 'Register patient', exact: true })
     .click()
@@ -347,6 +357,7 @@ test('multi-branch receptionists can choose an initial branch but cannot share a
   await signIn(staff)
   await expect(page).toHaveURL(/\/dashboard$/)
   await page.goto(`/patients/${patient!.id}/edit`)
+  await waitForPatientForm(page)
   await expect(page.getByRole('checkbox')).toHaveCount(1)
   await expect(
     page.getByRole('checkbox', {
@@ -368,6 +379,7 @@ test('multi-branch receptionists can choose an initial branch but cannot share a
     .eq('patient_id', patient!.id)
   expect(links.data).toEqual([{ branch_id: clinic.branchId }])
   await page.goto('/patients/new')
+  await waitForPatientForm(page)
   await page.getByLabel('Initial branch').selectOption(clinic.otherBranchId)
   await fillIdentity(page, 'Chosen', 'Branch')
   await page
@@ -515,4 +527,64 @@ test('patient registration and profiles work at mobile width without page overfl
     .select('id', { count: 'exact', head: true })
     .eq('clinic_id', clinic.id)
   expect(count.count).toBe(1)
+})
+
+test('finds formatted phone numbers with literal partial searches while preserving displayed formatting', async ({
+  page,
+  clinic,
+  createStaff,
+  signIn,
+}) => {
+  await seedPatients(clinic, [
+    {
+      first_name: 'Phone',
+      last_name: 'Visible',
+      phone: '+63 (917) 123-4567',
+      email: 'phone@example.test',
+    },
+    {
+      first_name: 'Phone',
+      last_name: 'Hidden',
+      phone: '+63 (917) 123-4567',
+      branchId: clinic.otherBranchId,
+    },
+  ])
+  await signIn(await createStaff({ roles: ['receptionist'] }))
+  await expect(page).toHaveURL(/\/dashboard$/)
+  await page.goto('/patients')
+  await waitForPatientForm(page)
+  for (const [query, matches] of [
+    ['9171234567', true],
+    ['917 123 4567', true],
+    ['1234567', true],
+    ['0917', false],
+    ['123%', false],
+    ['123_', false],
+    ['PHONE@EXAMPLE.TEST', true],
+    ['phone visible', true],
+  ] as const) {
+    await page.getByRole('searchbox', { name: 'Search patients' }).fill(query)
+    await page.getByRole('button', { name: 'Apply', exact: true }).click()
+    await expect(page).toHaveURL((url) => {
+      const value = url.searchParams.get('q')
+      // TanStack quotes numeric-looking strings to preserve their type.
+      return value === query || value === JSON.stringify(query)
+    })
+    await expect(
+      page.getByRole('searchbox', { name: 'Search patients' }),
+    ).toHaveValue(query)
+    await expect(
+      page.getByRole('button', { name: 'Apply', exact: true }),
+    ).toBeEnabled()
+    await expect(
+      page.getByRole('link', { name: 'Visible, Phone' }),
+    ).toHaveCount(matches ? 1 : 0)
+    await expect(page.getByRole('link', { name: 'Hidden, Phone' })).toHaveCount(
+      0,
+    )
+    if (matches)
+      await expect(
+        page.getByText('+63 (917) 123-4567', { exact: true }),
+      ).toBeVisible()
+  }
 })

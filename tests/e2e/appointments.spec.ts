@@ -536,3 +536,120 @@ test('paginates a busy calendar and resets pagination when filtering', async ({
     page.getByRole('navigation', { name: 'Appointment pages' }),
   ).toHaveCount(0)
 })
+
+test('updates confirmed status options when scheduling details change and are restored', async ({
+  page,
+  appointmentClinic: fixture,
+}) => {
+  const id = await seed(fixture)
+  const row = await fixture.admin
+    .from('appointments')
+    .select('updated_at')
+    .eq('id', id)
+    .single()
+  expect(
+    (
+      await fixture.receptionist.client.rpc('save_appointment', {
+        p_branch: fixture.branchId,
+        p_patient: fixture.patientId,
+        p_dentist: fixture.dentist.id,
+        p_start: '2090-05-01T01:00Z',
+        p_duration: 30,
+        p_status: 'confirmed',
+        p_id: id,
+        p_expected_updated_at: row.data!.updated_at,
+      })
+    ).error,
+  ).toBeNull()
+  await signIn(page, fixture.receptionist)
+  await visit(page).click()
+  await page
+    .getByRole('button', { name: 'Reschedule or change status' })
+    .click()
+  const status = page.getByLabel('Appointment status')
+  const scheduled = status.getByRole('option', {
+    name: 'Scheduled',
+    exact: true,
+  })
+  await expect(scheduled).toHaveCount(0)
+  await expect(
+    page.getByText('To select Scheduled,', { exact: false }),
+  ).toBeVisible()
+  for (const [label, changed, original] of [
+    ['Date and time', '2090-05-01T10:00', '2090-05-01T09:00'],
+    ['Duration (minutes)', '45', '30'],
+  ]) {
+    await page.getByLabel(label!).fill(changed!)
+    await expect(scheduled).toBeAttached()
+    await status.selectOption('scheduled')
+    await page.getByLabel(label!).fill(original!)
+    await expect(scheduled).toHaveCount(0)
+    await expect(status).toHaveValue('confirmed')
+  }
+  await page
+    .getByLabel('Booking dentist')
+    .selectOption(fixture.secondDentist.id)
+  await status.selectOption('scheduled')
+  await page.getByLabel('Booking dentist').selectOption(fixture.dentist.id)
+  await expect(status).toHaveValue('confirmed')
+  await expect(scheduled).toHaveCount(0)
+  await page.getByLabel('Date and time').fill('2090-05-01T10:00')
+  await status.selectOption('scheduled')
+  await page
+    .getByRole('button', { name: 'Save appointment', exact: true })
+    .click()
+  await expect(
+    page.getByText('Appointment updated.', { exact: true }),
+  ).toBeVisible()
+  const stored = await fixture.admin
+    .from('appointments')
+    .select('status, starts_at')
+    .eq('id', id)
+    .single()
+  expect(stored.data).toEqual({
+    status: 'scheduled',
+    starts_at: '2090-05-01T02:00:00+00:00',
+  })
+})
+
+test('normalizes phone searches in booking selection and calendar filtering', async ({
+  page,
+  appointmentClinic: fixture,
+}) => {
+  expect(
+    (
+      await fixture.admin
+        .from('patients')
+        .update({ phone: '+63 (917) 123-4567' })
+        .in('id', [fixture.patientId, fixture.hiddenPatientId])
+    ).error,
+  ).toBeNull()
+  await seed(fixture)
+  await signIn(page, fixture.receptionist)
+  await page
+    .getByRole('button', { name: 'Book appointment', exact: true })
+    .click()
+  for (const query of ['9171234567', '917 123 4567', '1234567']) {
+    await page.getByLabel('Find existing patient').fill(query)
+    await page.getByRole('button', { name: 'Search', exact: true }).click()
+    const options = page.getByLabel('Patient', { exact: true })
+    await expect(
+      options.getByRole('option', { name: /Visible/ }),
+    ).toBeAttached()
+    await expect(options.getByRole('option', { name: /Hidden/ })).toHaveCount(0)
+  }
+  await page.getByRole('button', { name: 'Close', exact: true }).click()
+  for (const [query, count] of [
+    ['9171234567', 1],
+    ['917 123 4567', 1],
+    ['1234567', 1],
+    ['0917', 0],
+    ['123%', 0],
+  ] as const) {
+    await page.getByLabel('Search patient', { exact: true }).fill(query)
+    await page.getByRole('button', { name: 'Apply filters' }).click()
+    await expect(
+      page.getByRole('button', { name: /^View Visible Appointment Patient/ }),
+    ).toHaveCount(count)
+  }
+})

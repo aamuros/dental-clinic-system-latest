@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { SetStateAction } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -16,7 +17,8 @@ import { canManageAppointments } from './access'
 import { getAppointmentPatientsFn, saveAppointmentFn } from './server'
 import { localDateTime, formatTime } from './time'
 import {
-  appointmentStatuses,
+  availableAppointmentStatuses,
+  appointmentScheduleChanged,
   saveAppointmentSchema,
   statusLabels,
 } from './schemas'
@@ -48,12 +50,11 @@ export function AppointmentPanel({
   const terminal =
     appointment?.status === 'completed' || appointment?.status === 'cancelled'
   const [editing, setEditing] = useState(!appointment)
-  const [openedAt] = useState(Date.now)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
   const [search, setSearch] = useState('')
-  const [values, setValues] = useState<SaveAppointment>({
+  const [values, setDraft] = useState<SaveAppointment>({
     id: appointment?.id,
     expectedUpdatedAt: appointment?.updated_at,
     branchId: appointment?.branch_id ?? allowedBranches[0]?.id ?? '',
@@ -68,6 +69,25 @@ export function AppointmentPanel({
       : 30,
     status: appointment?.status ?? 'scheduled',
   })
+  const statuses = availableAppointmentStatuses(
+    appointment,
+    values,
+    calendar.timezone,
+  )
+  function setValues(update: SetStateAction<SaveAppointment>) {
+    setDraft((current) => {
+      const next = typeof update === 'function' ? update(current) : update
+      const allowed = availableAppointmentStatuses(
+        appointment,
+        next,
+        calendar.timezone,
+      )
+      // Restoring the original schedule must also restore a valid status.
+      return allowed.includes(next.status)
+        ? next
+        : { ...next, status: appointment?.status ?? 'scheduled' }
+    })
+  }
   const patients = useQuery({
     queryKey: ['appointment-patients', values.branchId, search],
     queryFn: () =>
@@ -98,6 +118,18 @@ export function AppointmentPanel({
     if (!parsed.success) {
       setError(
         parsed.error.issues[0]?.message ?? 'Check the appointment details.',
+      )
+      return false
+    }
+    if (
+      !availableAppointmentStatuses(
+        appointment,
+        parsed.data,
+        calendar.timezone,
+      ).includes(status)
+    ) {
+      setError(
+        'This status is unavailable. To return a confirmed appointment to Scheduled, change its scheduling details. Complete or cancel using the original schedule.',
       )
       return false
     }
@@ -362,6 +394,7 @@ export function AppointmentPanel({
                     <Label htmlFor="booking-status">Appointment status</Label>
                     <NativeSelect
                       id="booking-status"
+                      aria-describedby="booking-status-help"
                       value={values.status}
                       onChange={(event) =>
                         setValues({
@@ -371,19 +404,27 @@ export function AppointmentPanel({
                         })
                       }
                     >
-                      {appointmentStatuses
-                        .filter(
-                          (status) =>
-                            status !== 'cancelled' &&
-                            (status !== 'completed' ||
-                              Date.parse(appointment.starts_at) <= openedAt),
-                        )
+                      {statuses
+                        .filter((status) => status !== 'cancelled')
                         .map((status) => (
                           <option key={status} value={status}>
                             {statusLabels[status]}
                           </option>
                         ))}
                     </NativeSelect>
+                    <p
+                      id="booking-status-help"
+                      className="text-xs text-muted-foreground"
+                    >
+                      {appointment.status === 'confirmed' &&
+                      !appointmentScheduleChanged(
+                        appointment,
+                        values,
+                        calendar.timezone,
+                      )
+                        ? 'To select Scheduled, change the branch, patient, dentist, date/time, or duration.'
+                        : 'Completion requires a started appointment with unchanged scheduling details. Use Cancel appointment to cancel the original schedule.'}
+                    </p>
                   </div>
                 )}
                 <Button

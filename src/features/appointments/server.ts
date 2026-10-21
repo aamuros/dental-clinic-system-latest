@@ -148,7 +148,7 @@ export const saveAppointmentFn = createServerFn({ method: 'POST' })
         '42501':
           'Appointment, patient, dentist, or branch access has changed. Reload the calendar.',
         '22023':
-          'Check the time, duration, and status. Completed and cancelled appointments cannot be changed.',
+          'Check the time, duration, and status. To return a confirmed appointment to Scheduled, change its scheduling details. Complete or cancel using the original schedule. Completed and cancelled appointments cannot be changed.',
       }
       return {
         error:

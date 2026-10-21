@@ -23,9 +23,9 @@ insert into staff_role_assignments(staff_id, clinic_id, branch_id, role) values
   ('31000000-0000-0000-0000-000000000005', '11000000-0000-0000-0000-000000000001', '21000000-0000-0000-0000-000000000001', 'billing_staff'),
   ('31000000-0000-0000-0000-000000000006', '11000000-0000-0000-0000-000000000001', '21000000-0000-0000-0000-000000000001', 'receptionist');
 insert into patients(id, clinic_id, first_name, last_name, birth_date, phone, email) values
-  ('41000000-0000-0000-0000-000000000001', '11000000-0000-0000-0000-000000000001', 'Visible', 'Synthetic', '2000-02-29', '+63 917 123 4567', 'visible@example.test'),
-  ('41000000-0000-0000-0000-000000000002', '11000000-0000-0000-0000-000000000001', 'Hidden', 'Synthetic', null, null, 'hidden@example.test'),
-  ('41000000-0000-0000-0000-000000000003', '11000000-0000-0000-0000-000000000002', 'Other', 'Synthetic', null, null, null),
+  ('41000000-0000-0000-0000-000000000001', '11000000-0000-0000-0000-000000000001', 'Visible', 'Synthetic', '2000-02-29', '+63 (917) 123-4567', 'visible@example.test'),
+  ('41000000-0000-0000-0000-000000000002', '11000000-0000-0000-0000-000000000001', 'Hidden', 'Synthetic', null, '+63 (917) 123-4567', 'hidden@example.test'),
+  ('41000000-0000-0000-0000-000000000003', '11000000-0000-0000-0000-000000000002', 'Other', 'Synthetic', null, '+63 (917) 123-4567', null),
   ('41000000-0000-0000-0000-000000000004', '11000000-0000-0000-0000-000000000001', 'Literal %_!\ Needle', 'Example', null, null, null);
 insert into patient_branch_access(patient_id, branch_id, clinic_id) values
   ('41000000-0000-0000-0000-000000000001', '21000000-0000-0000-0000-000000000001', '11000000-0000-0000-0000-000000000001'),
@@ -61,6 +61,17 @@ select is((select count(*)::integer from patients where search_text ilike '%new 
 select is((select count(*)::integer from patients where search_text ilike '%visible synthetic%'), 1, 'Full-name search works without a middle name');
 select is((select count(*)::integer from public.search_patients('visible synthetic')), 1, 'Indexed search matches names case insensitively');
 select is((select count(*)::integer from public.search_patients('visible@example.test')), 1, 'Indexed search matches contact details');
+select is((select count(*)::integer from public.search_patients('9171234567')), 1, 'Literal authorized search: 9171234567');
+select is((select count(*)::integer from public.search_patients('917 123 4567')), 1, 'Literal authorized search: 917 123 4567');
+select is((select count(*)::integer from public.search_patients('+63 (917) 123-4567')), 1, 'Literal authorized search: +63 (917) 123-4567');
+select is((select count(*)::integer from public.search_patients('1234567')), 1, 'Literal authorized search: 1234567');
+select is((select count(*)::integer from public.search_patients('0917')), 0, 'Literal authorized search: 0917');
+select is((select count(*)::integer from public.search_patients('917%123')), 0, 'Literal authorized search: 917%123');
+select is((select count(*)::integer from public.search_patients('917_123')), 0, 'Literal authorized search: 917_123');
+select is((select count(*)::integer from public.search_patients('917!123')), 0, 'Literal authorized search: 917!123');
+select is((select count(*)::integer from public.search_patients('patient9171234567')), 0, 'Literal authorized search: patient9171234567');
+select is((select count(*)::integer from public.search_patients('+ () -')), 0, 'Literal authorized search: + () -');
+select is((select count(*)::integer from public.search_patients('VISIBLE@EXAMPLE.TEST')), 1, 'Literal authorized search: VISIBLE@EXAMPLE.TEST');
 select is((select count(*)::integer from public.search_patients('Hidden')), 0, 'Indexed search hides inaccessible branches');
 select is((select count(*)::integer from public.search_patients('Other')), 0, 'Indexed search hides other clinics');
 select is((select count(*)::integer from public.search_patients('%_!\')), 1, 'Search treats percent, underscore, escape marker and backslash literally');
@@ -167,5 +178,26 @@ select set_config('request.jwt.claims', '{"sub":"31000000-0000-0000-0000-0000000
 select throws_ok($$select pg_temp.save()$$, '42501', null, 'Role revocation immediately removes write access');
 select is((select count(*)::integer from public.search_patients('Visible')), 0, 'Role revocation immediately removes indexed search access');
 reset role;
+-- Deterministic boundaries use the same helper as the audited save RPC.
+select is(private.clinic_local_date('Asia/Manila', '2026-10-21T15:59:59Z'), date '2026-10-21', 'Manila before midnight');
+select is(private.clinic_local_date('Asia/Manila', '2026-10-21T16:00:00Z'), date '2026-10-22', 'Manila midnight ahead of UTC');
+select is(private.clinic_local_date('America/Los_Angeles', '2026-10-22T06:59:59Z'), date '2026-10-21', 'Los Angeles before midnight behind UTC');
+select is(private.clinic_local_date('America/Los_Angeles', '2026-10-22T07:00:00Z'), date '2026-10-22', 'Los Angeles midnight');
+select is(private.clinic_local_date('Pacific/Kiritimati', '2026-12-31T10:00:00Z'), date '2027-01-01', 'Year boundary ahead of UTC');
+select set_config('request.jwt.claims', '{"sub":"31000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
+-- Exercise actual writes with both time zones, independently of session timezone.
+set local timezone = 'Pacific/Honolulu';
+update clinics set timezone = 'Asia/Manila' where id = '11000000-0000-0000-0000-000000000001';
+set local role authenticated;
+select lives_ok($$select pg_temp.save(pg_temp.details('Manila today') || jsonb_build_object('birthDate', (statement_timestamp() at time zone 'Asia/Manila')::date::text))$$, 'RPC accepts current Manila date');
+select throws_ok($$select pg_temp.save(pg_temp.details('Manila future') || jsonb_build_object('birthDate', ((statement_timestamp() at time zone 'Asia/Manila')::date + 1)::text))$$, '22023', null, 'RPC rejects tomorrow in Manila');
+select lives_ok($$select pg_temp.save(pg_temp.details('Minimum birth') || '{"birthDate":"1900-01-01"}')$$, 'Minimum birth date accepted');
+select throws_ok($$select pg_temp.save(pg_temp.details() || '{"birthDate":"1899-12-31"}')$$, '22023', null, 'Before minimum birth date rejected');
+select throws_ok($$select pg_temp.save(pg_temp.details() || '{"birthDate":"1900-02-29"}')$$, '22008', null, 'Non-leap century rejected');
+reset role;
+update clinics set timezone = 'America/Los_Angeles' where id = '11000000-0000-0000-0000-000000000001';
+set local role authenticated;
+select lives_ok($$select pg_temp.save(pg_temp.details('LA today') || jsonb_build_object('birthDate', (statement_timestamp() at time zone 'America/Los_Angeles')::date::text))$$, 'RPC accepts current Los Angeles date');
+select throws_ok($$select pg_temp.save(pg_temp.details('LA future') || jsonb_build_object('birthDate', ((statement_timestamp() at time zone 'America/Los_Angeles')::date + 1)::text))$$, '22023', null, 'RPC rejects tomorrow in Los Angeles');
 select * from finish();
 rollback;

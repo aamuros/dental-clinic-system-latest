@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { canManageAppointments } from '@/features/appointments/access'
 import {
+  availableAppointmentStatuses,
+  appointmentScheduleChanged,
   calendarSearchSchema,
   saveAppointmentSchema,
 } from '@/features/appointments/schemas'
@@ -224,4 +226,91 @@ describe('scheduling boundary cases', () => {
       dayBoundary('2011-12-31', 'Pacific/Apia'),
     )
   })
+})
+
+describe('appointment transition options', () => {
+  const values = saveAppointmentSchema.parse(valid)
+  const appointment = {
+    id: branchId,
+    branch_id: branchId,
+    patient_id: branchId,
+    dentist_staff_id: branchId,
+    starts_at: '2030-02-01T01:00:17.123456+00:00',
+    ends_at: '2030-02-01T01:30:17.123456+00:00',
+    status: 'confirmed' as const,
+    updated_at: '2026-10-21T01:00:00Z',
+    patient_name: 'Synthetic',
+    dentist_name: 'Synthetic',
+    branch_name: 'Synthetic',
+  }
+  const now = Date.parse('2026-10-21T00:00Z')
+  it('allows booking only as Scheduled', () => {
+    expect(
+      availableAppointmentStatuses(null, values, 'Asia/Manila', now),
+    ).toEqual(['scheduled'])
+  })
+  it('does not offer Scheduled for an unchanged confirmed appointment', () => {
+    expect(appointmentScheduleChanged(appointment, values, 'Asia/Manila')).toBe(
+      false,
+    )
+    expect(
+      availableAppointmentStatuses(appointment, values, 'Asia/Manila', now),
+    ).toEqual(['confirmed', 'cancelled'])
+  })
+  it.each([
+    { branchId: 'other' },
+    { patientId: 'other' },
+    { dentistId: 'other' },
+    { localStart: '2030-02-01T10:00' },
+    { duration: 45 },
+  ])(
+    'allows Confirmed → Scheduled after changing %j, and removes it on restore',
+    (change) => {
+      expect(
+        availableAppointmentStatuses(
+          appointment,
+          { ...values, ...change },
+          'Asia/Manila',
+          now,
+        ),
+      ).toEqual(['scheduled', 'confirmed'])
+      expect(
+        availableAppointmentStatuses(appointment, values, 'Asia/Manila', now),
+      ).not.toContain('scheduled')
+    },
+  )
+  it('offers confirmation and cancellation, and completion only after start with no schedule edits', () => {
+    const scheduled = { ...appointment, status: 'scheduled' as const }
+    expect(
+      availableAppointmentStatuses(scheduled, values, 'Asia/Manila', now),
+    ).toEqual(['scheduled', 'confirmed', 'cancelled'])
+    const started = Date.parse(appointment.starts_at)
+    expect(
+      availableAppointmentStatuses(scheduled, values, 'Asia/Manila', started),
+    ).toEqual(['scheduled', 'confirmed', 'completed', 'cancelled'])
+    expect(
+      availableAppointmentStatuses(appointment, values, 'Asia/Manila', started),
+    ).toEqual(['confirmed', 'completed', 'cancelled'])
+    expect(
+      availableAppointmentStatuses(
+        appointment,
+        { ...values, duration: 45 },
+        'Asia/Manila',
+        started,
+      ),
+    ).not.toContain('completed')
+  })
+  it.each(['completed', 'cancelled'] as const)(
+    'keeps %s appointments immutable',
+    (status) => {
+      expect(
+        availableAppointmentStatuses(
+          { ...appointment, status },
+          values,
+          'Asia/Manila',
+          now,
+        ),
+      ).toEqual([])
+    },
+  )
 })
